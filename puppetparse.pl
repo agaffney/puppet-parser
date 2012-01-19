@@ -923,6 +923,48 @@ sub parse_cur_token {
 	print "ERROR: Could not parse token\n";
 }
 
+package PuppetParser::Object;
+
+my %defaults = (
+	inner_spacing => 0,
+	outer_spacing => 0,
+);
+
+sub new {
+	my ($class, %args) = @_;
+	my $self = { contents => [] };
+	for(keys %args) {
+		$self->{$_} = $args{$_};
+	}
+	for(keys %defaults) {
+		if(!defined $self->{$_}) {
+			$self->{$_} = $defaults{$_};
+		}
+	}
+	bless($self, $class);
+	return $self;
+}
+
+sub add_child {
+	my ($self, $child) = @_;
+	push @{$self->{contents}}, $child;
+}
+
+sub get_num_children {
+	my ($self) = @_;
+	return scalar(@{$self->{contents}});
+}
+
+sub get_child {
+	my ($self, $idx) = @_;
+	return $self->{contents}->[$idx];
+}
+
+sub get_prev_child {
+	my ($self) = @_;
+	return $self->get_child($self->get_num_children() - 2);
+}
+
 package main;
 
 use Getopt::Std;
