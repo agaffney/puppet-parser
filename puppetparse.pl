@@ -92,6 +92,13 @@ my @tokens = (
 	}
 );
 
+my @object_classes = (
+	'PuppetParser::Object',
+	'PuppetParser::Class',
+	'PuppetParser::Resource',
+);
+my $default_object_class = 'PuppetParser::Object';
+
 my @parse_patterns = (
 	{
 		patterns => [['RETURN']],
@@ -100,10 +107,6 @@ my @parse_patterns = (
 	{
 		patterns => [['RBRACE']],
 		func => 'parse_rbrace',
-	},
-	{
-		patterns => [['CLASS']],
-		func => 'parse_class',
 	},
 	{
 		patterns => [['DEFINE']],
@@ -170,9 +173,18 @@ sub new {
 		lexer => undef,
 		buffer => '',
 		indent => 0,
+		obj_stack => [],
 	};
 	bless($self, $class);
+	for(@object_classes) {
+		eval "use $_;";
+	}
 	return $self;
+}
+
+sub object_stack {
+	my ($self) = @_;
+	return $self->{obj_stack};
 }
 
 sub output_json {
@@ -865,7 +877,7 @@ sub parse_tokens {
 	my ($self) = @_;
 	my $cur_parent = $self->get_parent();
 	while($self->cur_token()) {
-		$self->parse_cur_token();
+		$self->scan_for_object();
 		$self->next_token();
 	}
 #	print Dumper($self->{tree});
@@ -900,21 +912,28 @@ sub match_token_sequence {
 	return 1;
 }
 
-sub parse_cur_token {
+sub scan_for_object {
 	my ($self) = @_;
 	my $token = $self->cur_token();
-	my $type = $token->{type};
-	my $text = $token->{text};
 	print "Line: ", $token->{line}, ", ";
-	print "Type: ", $type, ", ";
-	print "Content:->", $text, "<-\n";
+	print "Type: ", $token->{type}, ", ";
+	print "Content:->", $token->{text}, "<-\n";
 	my $orig_token = $self->get_token_idx();
 	my $cur_token = undef;
-	for(@parse_patterns) {
-		my ($patterns, $func) = ($_->{'patterns'}, $_->{'func'});
-		PATTERN: for my $pattern (@{$patterns}) {
+	PACKAGE: for my $package (@object_classes) {
+		print "Package: $package\n";
+		print Dumper($package->patterns());
+		PATTERN: for my $pattern (@{$package->patterns()}) {
+			print "Pattern for package ${package}:\n";
+			print Dumper($pattern);
 			if($self->match_token_sequence($pattern, ['RETURN'])) {
-				return $self->$func();
+				if($package->valid($self)) {
+					print "The token is valid!\n";
+					return $package->new(parser => $self);
+				} else {
+					print "Token FAIL\n";
+					next PACKAGE;
+				}
 			}
 		}
 	}
@@ -929,6 +948,7 @@ my %defaults = (
 	inner_spacing => 0,
 	outer_spacing => 0,
 );
+my @patterns = ();
 
 sub new {
 	my ($class, %args) = @_;
@@ -943,6 +963,10 @@ sub new {
 	}
 	bless($self, $class);
 	return $self;
+}
+
+sub patterns {
+	return \@patterns;
 }
 
 sub add_child {
@@ -964,6 +988,68 @@ sub get_prev_child {
 	my ($self) = @_;
 	return $self->get_child($self->get_num_children() - 2);
 }
+
+sub indent {
+	my ($self, $additional) = @_;
+	my $level = scalar(@{$self->{parser}->object_stack()}) - 1;
+	if(defined $additional) {
+		$level += $additional;
+	}
+	return '  ' x $level;
+}
+
+sub valid {
+	return 1;
+}
+
+sub output {
+	# This is a shell for simple objects. This will be overriden in more complex types
+	my ($self) = @_;
+	return defined $self->{text} ? $self->{text} : '';
+}
+
+package PuppetParser::Class;
+
+use Data::Dumper;
+
+our @ISA = 'PuppetParser::Object';
+our %defaults = (
+	inner_spacing => 1,
+	outer_spacing => 1,
+);
+our @patterns = (
+	['CLASS'],
+);
+
+sub new {
+	print "constructor for PuppetParser::Class\n";
+	my $type = shift;
+	my $class = ref $type || $type;
+	my $self = $class->SUPER::new(@_);
+	print Dumper($self);
+	return $self;
+}
+
+sub patterns {
+	return \@patterns;
+}
+
+sub output {
+	my ($self) = @_;
+	my $buf = $self->indent() . $self->{text};
+	return $buf;
+}
+
+sub valid {
+	return 1;
+}
+
+package PuppetParser::Resource;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+);
+
 
 package main;
 
