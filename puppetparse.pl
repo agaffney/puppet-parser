@@ -240,6 +240,11 @@ sub output_simple {
 
 sub error {
 	my ($self, $msg) = @_;
+#	my $d = Data::Dumper->new([$self->{tree}], ['tree']);
+#	$d->Maxdepth(1);
+#	$d->Indent(4);
+#	$d->Seen({'*parser' => $self});
+#	print $d->Dump;
 	print STDERR "ERROR: ${msg} on line " . $self->cur_token()->{line} . " in file " . $self->{file} . "\n";
 	exit 1;
 }
@@ -965,7 +970,7 @@ sub scan_for_object {
 	}
 	$self->set_token_idx($orig_token);
 	# We don't know how to handle this
-	$self->error("Unexpected token " . $self->cur_token()->{text});
+	$self->error("Unexpected token '" . $self->cur_token()->{text} . "'");
 }
 
 package PuppetParser::Object;
@@ -1165,6 +1170,15 @@ our @patterns = (
 
 sub patterns {
 	return \@patterns;
+}
+
+sub parse {
+	my ($self) = @_;
+	$self->{parser}->next_token();
+	if(!$self->{parser}->scan_for_token(['NAME', 'DOLLAR_VAR'])) {
+		$self->{parser}->error("Did not find expected token after 'include'");
+	}
+	$self->{class} = PuppetParser::Simple->new(parser => $self->{parser});
 }
 
 package main;
