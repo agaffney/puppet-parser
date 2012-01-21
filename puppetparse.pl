@@ -232,11 +232,6 @@ sub output_simple {
 
 sub error {
 	my ($self, $msg) = @_;
-#	my $d = Data::Dumper->new([$self->{tree}], ['tree']);
-#	$d->Maxdepth(1);
-#	$d->Indent(4);
-#	$d->Seen({'*parser' => $self});
-#	print $d->Dump;
 	print STDERR "ERROR: ${msg} on line " . $self->cur_token()->{line} . " in file " . $self->{file} . "\n";
 	exit 1;
 }
@@ -887,11 +882,13 @@ sub scan_for_object {
 
 package PuppetParser::Object;
 
-my %defaults = (
+use Data::Dumper;
+
+our %defaults = (
 	inner_spacing => 0,
 	outer_spacing => 0,
 );
-my @patterns = ();
+our @patterns = ();
 
 sub new {
 	my ($class, %args) = @_;
@@ -909,6 +906,14 @@ sub new {
 	return $self;
 }
 
+sub dump {
+	my ($self) = @_;
+	my $d = Data::Dumper->new([$self], ['tree']);
+	$d->Indent(4);
+	$d->Seen({'*parser_purposely_filtered' => $self->{parser}});
+	print $d->Dump;
+}
+
 sub parse {
 	return;
 }
@@ -916,6 +921,7 @@ sub parse {
 sub add_child {
 	my ($self, $child) = @_;
 	push @{$self->{contents}}, $child;
+#	$self->dump();
 }
 
 sub get_num_children {
@@ -1047,7 +1053,7 @@ sub patterns {
 
 sub parse {
 	my ($self) = @_;
-	my $name = PuppetParser::Simple->new(parser => $self->{parser});
+	$self->{funcname} = PuppetParser::Simple->new(parser => $self->{parser});
 	if(!$self->{parser}->scan_for_token(['LPAREN'])) {
 		$self->{parser}->error("Did not find expected token '('");
 	}
