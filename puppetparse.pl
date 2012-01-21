@@ -921,7 +921,7 @@ sub parse {
 sub add_child {
 	my ($self, $child) = @_;
 	push @{$self->{contents}}, $child;
-#	$self->dump();
+	$self->dump();
 }
 
 sub get_num_children {
@@ -1084,7 +1084,25 @@ sub patterns {
 
 sub parse {
 	my ($self) = @_;
-
+	$self->{variant} = PuppetParser::Simple->new(parser => $self->{parser});
+	$self->{condition} = [];
+	while(1) {
+		if($self->{parser}->scan_for_token(['LBRACE'])) {
+			$self->{parser}->next_token();
+			last;
+		}
+		push @{$self->{condition}}, PuppetParser::Simple->new(parser => $self->{parser});
+	}
+	while(1) {
+		if($self->{parser}->scan_for_token(['RBRACE'])) {
+			$self->next_token();
+			last;
+		}
+		if($self->{parser}->eof()) {
+			$self->{parser}->error("Unexpected end of file");
+		}
+		$self->add_child($self->{parser}->scan_for_object());
+	}
 }
 
 package PuppetParser::Resource;
