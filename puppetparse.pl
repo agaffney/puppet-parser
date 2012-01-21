@@ -97,6 +97,7 @@ my @object_classes = (
 	'PuppetParser::Resource',
 	'PuppetParser::Include',
 	'PuppetParser::FunctionCall',
+	'PuppetParser::IfStatement',
 	# Leave this one at the bottom, so its patterns match last
 	'PuppetParser::Simple',
 );
@@ -167,27 +168,18 @@ sub new {
 	my($class, $file) = @_;
 	my $self = {
 		file => $file,
-		tree => { type => 'ROOT', contents => [] },
-		parents => [],
-		parent_idx => 0,
 		parsed_tokens => [],
 		num_parsed_tokens => 0,
 		token_idx => 0,
 		lexer => undef,
 		buffer => '',
 		indent => 0,
-		obj_stack => [],
 	};
 	bless($self, $class);
 #	for(@object_classes) {
 #		eval "use $_;";
 #	}
 	return $self;
-}
-
-sub object_stack {
-	my ($self) = @_;
-	return $self->{obj_stack};
 }
 
 sub output_json {
@@ -307,7 +299,6 @@ sub read_tokens {
 	}
 	$self->{num_parsed_tokens} = scalar(@{$self->{parsed_tokens}});
 	$self->{token_idx} = 0;
-	$self->set_parent($self->{tree});
 #	print "num_parsed_tokens=$num_parsed_tokens, token_idx=$token_idx\n";
 }
 
@@ -323,14 +314,6 @@ sub cur_token {
 	my ($self) = @_;
 #	print "cur_token(): token_idx=" . $self->{token_idx} . "\n";
 	return defined($self->{parsed_tokens}->[$self->{token_idx}]) ? $self->{parsed_tokens}->[$self->{token_idx}] : undef;
-}
-
-sub prev_token {
-	my ($self) = @_;
-	if($self->{token_idx} > 0) {
-		$self->{token_idx}--;
-	}
-	return $self->cur_token();
 }
 
 sub next_token {
@@ -349,31 +332,6 @@ sub set_token_idx {
 	$self->{token_idx} = $idx;
 }
 
-sub get_parent {
-	my ($self) = @_;
-	return $self->{parents}->[$self->{parent_idx}];
-}
-
-sub set_parent {
-	my ($self, $parent) = @_;
-	push @{$self->{parents}}, $parent;
-	$self->{parent_idx} = scalar(@{$self->{parents}}) - 1;
-}
-
-sub prev_parent {
-	my ($self) = @_;
-	pop @{$self->{parents}};
-	$self->{parent_idx} = scalar(@{$self->{parents}}) - 1;
-}
-
-sub add_to_parent {
-	my ($self, $obj) = @_;
-	my $parent = $self->get_parent();
-#	print "add_to_parent(): Parent idx=" . $self->{parent_idx} . ", type=" . $parent->{type} . ", children=" . scalar(@{$parent->{contents}}) . "\n";
-	push @{$parent->{contents}}, $obj;
-#	print Dumper($self->{tree});
-}
-
 sub max_key_length {
 	my ($self, $values) = @_;
 	my $max_key_len = 0;
@@ -383,26 +341,6 @@ sub max_key_length {
 		}
 	}
 	return $max_key_len;
-}
-
-sub parse_return {
-	my ($self) = @_;
-	# Just ignore it for now
-	1;
-}
-
-sub parse_rbrace {
-	my ($self) = @_;
-	$self->prev_parent();
-}
-
-sub parse_class {
-	my ($self) = @_;
-	my $obj = { type => 'class', contents => [] };
-	$obj->{name} = $self->next_token()->{text};
-	$self->add_to_parent($obj);
-	$self->next_token(); # LBRACE
-	$self->set_parent($obj);
 }
 
 sub output_class {
@@ -444,7 +382,6 @@ sub parse_define {
 		$self->next_token();
 	}
 	$self->add_to_parent($obj);
-	$self->set_parent($obj);
 }
 
 sub output_define {
@@ -475,21 +412,6 @@ sub output_define {
 	$buf .= "\n" . $self->indent() . '}' . "\n";
 }
 
-sub parse_func_call {
-	my ($self) = @_;
-	my $cur_token = $self->cur_token();
-	my $obj = { type => 'func_call', name => $cur_token->{text}, args => [] };
-	$self->next_token(); # left paren
-	while(1) {
-		my $token = $self->next_token();
-		if($token->{type} eq 'RPAREN') {
-			last;
-		}
-		push @{$obj->{args}}, $token;
-	}
-	$self->add_to_parent($obj);
-}
-
 sub output_func_call {
 	my ($self, $obj, $embed) = @_;
 	my $buf = $embed ? '' : ($self->newline() . $self->indent());
@@ -499,13 +421,6 @@ sub output_func_call {
 	}
 	$buf .= ')' . ($embed ? '' : $self->newline());
 	return $buf;
-}
-
-sub parse_include {
-	my ($self) = @_;
-	my $obj = { type => 'include' };
-	$obj->{class} = $self->next_token()->{text};
-	$self->add_to_parent($obj);
 }
 
 sub output_include {
@@ -672,7 +587,6 @@ sub parse_case {
 		return;
 	}
 	$self->add_to_parent($obj);
-	$self->set_parent($obj);
 }
 
 sub output_case {
@@ -706,7 +620,6 @@ sub parse_case_condition {
 		$self->next_token();
 	}
 	$self->add_to_parent($obj);
-	$self->set_parent($obj);
 }
 
 sub output_case_condition {
@@ -874,7 +787,6 @@ sub parse_if {
 		push @{$obj->{condition}}, $next_token;
 	}
 	$self->add_to_parent($obj);
-	$self->set_parent($obj);
 }
 
 sub output_if {
@@ -1149,6 +1061,24 @@ sub parse {
 		# Implement me!
 		$self->{parser}->next_token();
 	}
+}
+
+package PuppetParser::IfStatement;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['IF'],
+	['ELSIF'],
+	['ELSE'],
+);
+
+sub patterns {
+	return \@patterns;
+}
+
+sub parse {
+	my ($self) = @_;
+
 }
 
 package PuppetParser::Resource;
