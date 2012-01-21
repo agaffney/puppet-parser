@@ -93,11 +93,14 @@ my @tokens = (
 );
 
 my @object_classes = (
-	'PuppetParser::Object',
 	'PuppetParser::Class',
 	'PuppetParser::Resource',
+	'PuppetParser::Include',
+	'PuppetParser::FunctionCall',
+	# Leave this one at the bottom, so its patterns match last
+	'PuppetParser::Simple',
 );
-my $default_object_class = 'PuppetParser::Object';
+my $default_object_class = 'PuppetParser::Simple';
 
 my @parse_patterns = (
 	{
@@ -176,9 +179,9 @@ sub new {
 		obj_stack => [],
 	};
 	bless($self, $class);
-	for(@object_classes) {
-		eval "use $_;";
-	}
+#	for(@object_classes) {
+#		eval "use $_;";
+#	}
 	return $self;
 }
 
@@ -235,6 +238,12 @@ sub output_simple {
 	return $buf;
 }
 
+sub error {
+	my ($self, $msg) = @_;
+	print STDERR "ERROR: ${msg} on line " . $self->cur_token()->{line} . " in file " . $self->{file} . "\n";
+	exit 1;
+}
+
 sub indent {
 	my ($self, $level) = @_;
 	if(!defined $level) {
@@ -260,10 +269,13 @@ sub parse {
 	$self->{lexer} = Parse::Lex->new(@tokens);
 	$self->{lexer}->from(\*FOO);
 
+	# Read in and store tokens
 	$self->read_tokens();
+
+	# Start the process
+	$self->{tree} = PuppetParser::Object->new(type => 'ROOT');
 	while($self->cur_token()) {
-		$self->parse_tokens();
-		$self->next_token();
+		$self->{tree}->add_child($self->scan_for_object());
 	}
 }
 
@@ -292,6 +304,14 @@ sub read_tokens {
 	$self->{token_idx} = 0;
 	$self->set_parent($self->{tree});
 #	print "num_parsed_tokens=$num_parsed_tokens, token_idx=$token_idx\n";
+}
+
+sub eof {
+	my ($self) = @_;
+	if(!defined $self->cur_token()) {
+		return 1;
+	}
+	return 0;
 }
 
 sub cur_token {
@@ -873,17 +893,6 @@ sub output_if {
 	return $buf;
 }
 
-sub parse_tokens {
-	my ($self) = @_;
-	my $cur_parent = $self->get_parent();
-	while($self->cur_token()) {
-		$self->scan_for_object();
-		$self->next_token();
-	}
-#	print Dumper($self->{tree});
-#	print to_json($self->{tree});
-}
-
 sub match_token_sequence {
 	my ($self, $seq, $ignore) = @_;
 	if(!defined $ignore) {
@@ -912,6 +921,29 @@ sub match_token_sequence {
 	return 1;
 }
 
+sub scan_for_token {
+	my ($self, $types, $ignore) = @_;
+	if(!defined $ignore) {
+		$ignore = ['RETURN', 'COMMENT', 'MLCOMMENT'];
+	}
+	TOKEN: while(my $token = $self->cur_token()) {
+		for(@{$ignore}) {
+			if($token->{type} eq $_) {
+				# The next token is of a type we want to ignore
+				$self->next_token();
+				next TOKEN;
+			}
+		}
+		for(@{$types}) {
+			if($token->{type} eq $_) {
+				return 1;
+			}
+		}
+		# Could not find the expected token
+		return 0;
+	}
+}
+
 sub scan_for_object {
 	my ($self) = @_;
 	my $token = $self->cur_token();
@@ -921,17 +953,11 @@ sub scan_for_object {
 	my $orig_token = $self->get_token_idx();
 	my $cur_token = undef;
 	PACKAGE: for my $package (@object_classes) {
-		print "Package: $package\n";
-		print Dumper($package->patterns());
 		PATTERN: for my $pattern (@{$package->patterns()}) {
-			print "Pattern for package ${package}:\n";
-			print Dumper($pattern);
 			if($self->match_token_sequence($pattern, ['RETURN'])) {
 				if($package->valid($self)) {
-					print "The token is valid!\n";
 					return $package->new(parser => $self);
 				} else {
-					print "Token FAIL\n";
 					next PACKAGE;
 				}
 			}
@@ -939,7 +965,7 @@ sub scan_for_object {
 	}
 	$self->set_token_idx($orig_token);
 	# We don't know how to handle this
-	print "ERROR: Could not parse token\n";
+	$self->error("Unexpected token " . $self->cur_token()->{text});
 }
 
 package PuppetParser::Object;
@@ -962,11 +988,12 @@ sub new {
 		}
 	}
 	bless($self, $class);
+	$self->parse();
 	return $self;
 }
 
-sub patterns {
-	return \@patterns;
+sub parse {
+	return;
 }
 
 sub add_child {
@@ -1008,6 +1035,28 @@ sub output {
 	return defined $self->{text} ? $self->{text} : '';
 }
 
+package PuppetParser::Simple;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['NAME'],
+	['DOLLAR_VAR'],
+	['DQUOTES'],
+	['SQUOTES'],
+);
+
+sub patterns {
+	return \@patterns;
+}
+
+sub parse {
+	my ($self) = @_;
+	my $token = $self->{parser}->cur_token();
+	$self->{type} = $token->{type};
+	$self->{text} = $token->{text};
+	$self->{parser}->next_token();
+}
+
 package PuppetParser::Class;
 
 use Data::Dumper;
@@ -1021,13 +1070,37 @@ our @patterns = (
 	['CLASS'],
 );
 
-sub new {
-	print "constructor for PuppetParser::Class\n";
-	my $type = shift;
-	my $class = ref $type || $type;
-	my $self = $class->SUPER::new(@_);
-	print Dumper($self);
-	return $self;
+#sub new {
+#	my $type = shift;
+#	my $class = ref $type || $type;
+#	my $self = $class->SUPER::new(@_);
+#	$self->parse();
+#	return $self;
+#}
+
+sub parse {
+	my ($self) = @_;
+	$self->{parser}->next_token();
+	if(!$self->{parser}->scan_for_token(['NAME'])) {
+		$self->{parser}->error("Did not find expected token type after 'class'");
+	}
+	my $name = PuppetParser::Simple->new(parser => $self->{parser});
+#	$Data::Dumper::Maxdepth = 1;
+#	print Dumper($name);
+	if(!$self->{parser}->scan_for_token(['LBRACE'])) {
+		$self->{parser}->error("Did not find expected token '{'");
+	}
+	$self->{parser}->next_token();
+	while(1) {
+		if($self->{parser}->scan_for_token(['RBRACE'])) {
+			$self->next_token();
+			last;
+		}
+		if($self->{parser}->eof()) {
+			$self->{parser}->error("Unexpected end of file");
+		}
+		$self->add_child($self->{parser}->scan_for_object());
+	}
 }
 
 sub patterns {
@@ -1044,12 +1117,55 @@ sub valid {
 	return 1;
 }
 
+package PuppetParser::FunctionCall;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['NAME', 'LPAREN'],
+);
+
+sub patterns {
+	return \@patterns;
+}
+
+sub parse {
+	my ($self) = @_;
+	my $name = PuppetParser::Simple->new(parser => $self->{parser});
+	if(!$self->{parser}->scan_for_token(['LPAREN'])) {
+		$self->{parser}->error("Did not find expected token '('");
+	}
+	$self->{parser}->next_token();
+	$self->{args} = [];
+	while(1) {
+		if($self->{parser}->scan_for_token(['RPAREN'])) {
+			$self->{parser}->next_token();
+			last;
+		}
+		# Implement me!
+		$self->{parser}->next_token();
+	}
+}
+
 package PuppetParser::Resource;
 
 our @ISA = 'PuppetParser::Object';
 our @patterns = (
 );
 
+sub patterns {
+	return \@patterns;
+}
+
+package PuppetParser::Include;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['INCLUDE'],
+);
+
+sub patterns {
+	return \@patterns;
+}
 
 package main;
 
