@@ -99,16 +99,13 @@ my @object_classes = (
 	'PuppetParser::FunctionCall',
 	'PuppetParser::IfStatement',
 	'PuppetParser::VarAssignment',
+	'PuppetParser::Define',
 	# Leave this one at the bottom, so its patterns match last
 	'PuppetParser::Simple',
 );
 my $default_object_class = 'PuppetParser::Simple';
 
 my @parse_patterns = (
-	{
-		patterns => [['DEFINE']],
-		func => 'parse_define',
-	},
 	{
 		patterns => [['CASE']],
 		func => 'parse_case',
@@ -845,6 +842,33 @@ sub scan_for_object {
 	$self->error("Unexpected token '" . $self->cur_token()->{text} . "'");
 }
 
+sub scan_for_value {
+	my ($self, $term) = @_;
+	if(!defined $term) {
+		$term = ['RETURN', 'COMMENT'];
+	}
+	my $orig_token = $self->get_token_idx();
+	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR'])) {
+		# This looks like a simple value
+		my $value = PuppetParser::Simple->new(parser => $self);
+		if(!$self->scan_for_token($term, [])) {
+			# This isn't a simple value after all
+			$self->set_token_idx($orig_token);
+			return PuppetParser::Expression->new(parser => $self, term => $term);
+		}
+		return $value;
+	}
+	if($self->scan_for_token(['LBRACE'])) {
+		# This looks like a hash
+		return PuppetParser::Hash->new(parser => $self);
+	}
+	if($self->scan_for_token(['LBRACK'])) {
+		# This looks like a list
+		return PuppetParser::List->new(parser => $self);
+	}
+	$self->error("Unexpected token '" . $self->cur_token()->{text} . "'");
+}
+
 package PuppetParser::Object;
 
 use Data::Dumper;
@@ -858,17 +882,28 @@ our @patterns = ();
 sub new {
 	my ($class, %args) = @_;
 	my $self = { contents => [] };
+	bless($self, $class);
 	for(keys %args) {
 		$self->{$_} = $args{$_};
 	}
-	for(keys %defaults) {
-		if(!defined $self->{$_}) {
-			$self->{$_} = $defaults{$_};
-		}
-	}
-	bless($self, $class);
+#	if(defined $self->{parser}) {
+#		print "::Object::new(class=$class) - idx=" . $self->{parser}->get_token_idx() . ", text=" . $self->{parser}->cur_token()->{text} . "\n";
+#	}
+	$self->apply_defaults();
 	$self->parse();
 	return $self;
+}
+
+sub apply_defaults {
+	my ($self, $def) = @_;
+	if(!defined $def) {
+		$def = \%defaults;
+	}
+	for(keys %{$def}) {
+		if(!defined $self->{$_}) {
+			$self->{$_} = $def->{$_};
+		}
+	}
 }
 
 sub dump {
@@ -947,6 +982,59 @@ sub parse {
 	$self->{parser}->next_token();
 }
 
+package PuppetParser::List;
+
+our @ISA = 'PuppetParser::Object';
+
+sub apply_defaults {
+	my ($self) = @_;
+	$self->SUPER::apply_defaults({ start => 'LBRACK', end => 'RBRACK' });
+}
+
+sub parse {
+	my ($self) = @_;
+	$self->{values} = [];
+	if(!$self->{parser}->scan_for_token([$self->{start}], [])) {
+		# The sky is falling
+		$self->{parser}->error("Did not find expected token '" . $self->{start} . "'");
+	}
+	$self->{parser}->next_token();
+	while(1) {
+		if($self->{parser}->scan_for_token([$self->{end}], [])) {
+			$self->{parser}->next_token();
+			last;
+		}
+		if($self->{parser}->scan_for_token(['COMMA', 'RETURN'], [])) {
+			$self->{parser}->next_token();
+			next;
+		}
+		push @{$self->{values}}, $self->{parser}->scan_for_value(['COMMA', $self->{end}]);
+	}
+}
+
+package PuppetParser::Hash;
+
+our @ISA = 'PuppetParser::Object';
+
+sub parse {
+	my ($self) = @_;
+}
+
+package PuppetParser::Expression;
+
+our @ISA = 'PuppetParser::Object';
+
+sub parse {
+	my ($self) = @_;
+	$self->{parts} = [];
+	while(1) {
+		if($self->{parser}->scan_for_token($self->{term}, [])) {
+			last;
+		}
+		push @{$self->{parts}}, PuppetParser::Simple->new(parser => $self->{parser});
+	}
+}
+
 package PuppetParser::Class;
 
 use Data::Dumper;
@@ -959,14 +1047,6 @@ our %defaults = (
 our @patterns = (
 	['CLASS'],
 );
-
-#sub new {
-#	my $type = shift;
-#	my $class = ref $type || $type;
-#	my $self = $class->SUPER::new(@_);
-#	$self->parse();
-#	return $self;
-#}
 
 sub parse {
 	my ($self) = @_;
@@ -1007,6 +1087,55 @@ sub valid {
 	return 1;
 }
 
+package PuppetParser::Define;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['DEFINE'],
+);
+
+sub patterns {
+	return \@patterns;
+}
+
+sub parse {
+	my ($self) = @_;
+	$self->{parser}->next_token();
+	if(!$self->{parser}->scan_for_token(['NAME'], [])) {
+		$self->{parser}->error("Unexpected token after 'define'");
+	}
+	$self->{defname} = PuppetParser::Simple->new(parser => $self->{parser});
+	$self->{args} = [];
+	if($self->{parser}->scan_for_token(['LPAREN'])) {
+		$self->{parser}->next_token();
+		while(1) {
+			if($self->{parser}->scan_for_token(['RPAREN'], [])) {
+				$self->{parser}->next_token();
+				last;
+			}
+			if($self->{parser}->scan_for_token(['COMMA'], [])) {
+				$self->{parser}->next_token();
+				next;
+			}
+			push @{$self->{args}}, $self->{parser}->scan_for_value(['COMMA', 'RPAREN']);
+		}
+	}
+	if(!$self->{parser}->scan_for_token(['LBRACE'], [])) {
+		$self->{parser}->error("Unexpected token");
+	}
+	$self->{parser}->next_token();
+	while(1) {
+		if($self->{parser}->scan_for_token(['RBRACE'])) {
+			$self->next_token();
+			last;
+		}
+		if($self->{parser}->eof()) {
+			$self->{parser}->error("Unexpected end of file");
+		}
+		$self->add_child($self->{parser}->scan_for_object());
+	}
+}
+
 package PuppetParser::FunctionCall;
 
 our @ISA = 'PuppetParser::Object';
@@ -1031,8 +1160,7 @@ sub parse {
 			$self->{parser}->next_token();
 			last;
 		}
-		# Implement me!
-		$self->{parser}->next_token();
+		push @{$self->{args}}, $self->{parser}->scan_for_value(['COMMA', 'RPAREN']);
 	}
 }
 
@@ -1111,16 +1239,7 @@ sub parse {
 	}
 	$self->{parser}->next_token();
 	$self->{value} = [];
-	while(1) {
-		if($self->{parser}->scan_for_token(['COMMENT'], [])) {
-			last;
-		}
-		if($self->{parser}->scan_for_token(['RETURN'], [])) {
-			$self->{parser}->next_token();
-			last;
-		}
-		push @{$self->{value}}, PuppetParser::Simple->new(parser => $self->{parser});
-	}
+	$self->{value} = $self->{parser}->scan_for_value();
 }
 
 package PuppetParser::Resource;
@@ -1152,34 +1271,50 @@ sub parse {
 		$self->{parser}->error("Did not find expected token '{'");
 	}
 	$self->{parser}->next_token();
-	while(1) {
+	TOKEN: while(1) {
 		if($self->{parser}->scan_for_token(['RBRACE'])) {
 			$self->{parser}->next_token();
-			last;
+			last TOKEN;
+		}
+		if($self->{parser}->scan_for_token(['RETURN'], [])) {
+			# Skip a newline
+			$self->{parser}->next_token();
+			next TOKEN;
 		}
 		if($self->{parser}->scan_for_token(['COMMENT'], ['RETURN'])) {
 			# I don't know what to do with this yet, but we're looking for it anyway
-			$self-{parser}->next_token();
-			next;
+			$self->{parser}->next_token();
+			next TOKEN;
+		}
+		if($self->{parser}->scan_for_token(['COMMA'])) {
+			$self->{parser}->next_token();
+			next TOKEN;
 		}
 		for my $pattern (@res_title_patterns) {
 			if($self->{parser}->match_token_sequence($pattern)) {
 				# It's a resource title
 				$self->{restitle} = PuppetParser::Simple->new(parser => $self->{parser});
-				next;
+				$self->{parser}->next_token();
+				next TOKEN;
 			}
 		}
 		for my $pattern (@key_value_patterns) {
 			if($self->{parser}->match_token_sequence($pattern)) {
 				# It's a key/value pair
-
+				my $key = PuppetParser::Simple->new(parser => $self->{parser});
+				$self->{parser}->next_token();
+				# Parse the value
+				$self->{value} = $self->{parser}->scan_for_value(['COMMA', 'SEMIC', 'RETURN', 'RBRACE']);
+				next TOKEN;
 			}
 		}
-		$self->{parser}->error("Unexpected token");
+		$self->{parser}->error("Unexpected token '" . $self->{parser}->cur_token()->{text} . "'");
 	}
 }
 
 package main;
+
+$| = 1;
 
 use Getopt::Std;
 
