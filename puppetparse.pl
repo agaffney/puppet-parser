@@ -106,24 +106,8 @@ my $default_object_class = 'PuppetParser::Simple';
 
 my @parse_patterns = (
 	{
-		patterns => [['RETURN']],
-		func => 'parse_return',
-	},
-	{
-		patterns => [['RBRACE']],
-		func => 'parse_rbrace',
-	},
-	{
 		patterns => [['DEFINE']],
 		func => 'parse_define',
-	},
-	{
-		patterns => [['INCLUDE']],
-		func => 'parse_include',
-	},
-	{
-		patterns => [['DOLLAR_VAR', 'EQUALS']],
-		func => 'parse_var_assignment',
 	},
 	{
 		patterns => [['CASE']],
@@ -144,31 +128,14 @@ my @parse_patterns = (
 		func => 'parse_comment',
 	},
 	{
-		patterns => [['NAME', 'LBRACE']],
-		func => 'parse_resource',
-	},
-	{
 		patterns => [['NAME', 'LBRACK']],
 		func => 'parse_resource_override',
-	},
-	{
-		patterns => [['NAME', 'LPAREN']],
-		func => 'parse_func_call',
-	},
-	{
-		patterns => [
-				['IF'],
-				['ELSE'],
-				['ELSIF'],
-		],
-		func => 'parse_if',
 	},
 );
 
 sub new {
-	my($class, $file) = @_;
+	my($class, %args) = @_;
 	my $self = {
-		file => $file,
 		parsed_tokens => [],
 		num_parsed_tokens => 0,
 		token_idx => 0,
@@ -176,6 +143,9 @@ sub new {
 		buffer => '',
 		indent => 0,
 	};
+	for(keys %args) {
+		$self->{$_} = $args{$_};
+	}
 	bless($self, $class);
 #	for(@object_classes) {
 #		eval "use $_;";
@@ -316,6 +286,13 @@ sub next_token {
 	my ($self) = @_;
 	$self->{token_idx}++;
 	return $self->cur_token();
+}
+
+sub inject_tokens {
+	# This function exists purely to facilitate the breaking up of multiple resource definitions in a single block
+	my ($self, $tokens) = @_;
+	splice(@{$self->{parsed_tokens}}, $self->{token_idx}, 0, @{$tokens});
+	$self->{num_parsed_tokens} = scalar(@{$self->{parsed_tokens}});
 }
 
 sub get_token_idx {
@@ -772,19 +749,6 @@ sub parse_resource_override {
 	my ($self) = @_;
 }
 
-sub parse_if {
-	my ($self) = @_;
-	my $cur_token = $self->cur_token();
-	my $obj = { type => 'if', variant => lc($cur_token->{type}), condition => [], contents => [] };
-	while(my $next_token = $self->next_token()) {
-		if($next_token->{type} eq 'LBRACE') {
-			last;
-		}
-		push @{$obj->{condition}}, $next_token;
-	}
-	$self->add_to_parent($obj);
-}
-
 sub output_if {
 	my ($self, $obj) = @_;
 	my $buf = '';
@@ -922,7 +886,9 @@ sub parse {
 sub add_child {
 	my ($self, $child) = @_;
 	push @{$self->{contents}}, $child;
-	$self->dump();
+	if($self->{parser}->{debug}) {
+		$self->dump();
+	}
 }
 
 sub get_num_children {
@@ -1106,16 +1072,6 @@ sub parse {
 	}
 }
 
-package PuppetParser::Resource;
-
-our @ISA = 'PuppetParser::Object';
-our @patterns = (
-);
-
-sub patterns {
-	return \@patterns;
-}
-
 package PuppetParser::Include;
 
 our @ISA = 'PuppetParser::Object';
@@ -1167,6 +1123,22 @@ sub parse {
 	}
 }
 
+package PuppetParser::Resource;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['NAME', 'LBRACE'],
+);
+
+sub patterns {
+	return \@patterns;
+}
+
+sub parse {
+	my ($self) = @_;
+	$self->{restype} = PuppetParser::Simple->new(parser => $self->{parser});
+}
+
 package main;
 
 use Getopt::Std;
@@ -1175,19 +1147,23 @@ use Getopt::Std;
 my %options;
 my $output = '';
 my $json = 0;
+my $debug = 0;
 
 # Parse options
-my $result = getopts('jo:', \%options);
+my $result = getopts('jdo:', \%options);
 if(defined $options{'o'}) {
 	$output = $options{'o'};
 }
 if(defined $options{'j'}) {
 	$json = $options{'j'};
 }
+if(defined $options{'d'}) {
+	$debug = $options{'d'};
+}
 my $file = shift;
 
 print "Parsing $file\n";
-my $parser = PuppetParser->new($file);
+my $parser = PuppetParser->new(file => $file, debug => $debug);
 $parser->parse();
 
 if($json) {
