@@ -1129,6 +1129,17 @@ our @ISA = 'PuppetParser::Object';
 our @patterns = (
 	['NAME', 'LBRACE'],
 );
+our @key_value_patterns = (
+	['NAME', 'FARROW'],
+	['DQUOTES', 'FARROW'],
+	['SQUOTES', 'FARROW'],
+);
+our @res_title_patterns = (
+	['DOLLAR_VAR', 'COLON'],
+	['SQUOTES', 'COLON'],
+	['DQUOTES', 'COLON'],
+	['LBRACK'],
+);
 
 sub patterns {
 	return \@patterns;
@@ -1137,6 +1148,35 @@ sub patterns {
 sub parse {
 	my ($self) = @_;
 	$self->{restype} = PuppetParser::Simple->new(parser => $self->{parser});
+	if(!$self->{parser}->scan_for_token(['LBRACE'])) {
+		$self->{parser}->error("Did not find expected token '{'");
+	}
+	$self->{parser}->next_token();
+	while(1) {
+		if($self->{parser}->scan_for_token(['RBRACE'])) {
+			$self->{parser}->next_token();
+			last;
+		}
+		if($self->{parser}->scan_for_token(['COMMENT'], ['RETURN'])) {
+			# I don't know what to do with this yet, but we're looking for it anyway
+			$self-{parser}->next_token();
+			next;
+		}
+		for my $pattern (@res_title_patterns) {
+			if($self->{parser}->match_token_sequence($pattern)) {
+				# It's a resource title
+				$self->{restitle} = PuppetParser::Simple->new(parser => $self->{parser});
+				next;
+			}
+		}
+		for my $pattern (@key_value_patterns) {
+			if($self->{parser}->match_token_sequence($pattern)) {
+				# It's a key/value pair
+
+			}
+		}
+		$self->{parser}->error("Unexpected token");
+	}
 }
 
 package main;
