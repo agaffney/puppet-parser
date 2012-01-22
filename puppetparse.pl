@@ -98,6 +98,7 @@ my @object_classes = (
 	'PuppetParser::Include',
 	'PuppetParser::FunctionCall',
 	'PuppetParser::IfStatement',
+	'PuppetParser::VarAssignment',
 	# Leave this one at the bottom, so its patterns match last
 	'PuppetParser::Simple',
 );
@@ -1095,7 +1096,7 @@ sub parse {
 	}
 	while(1) {
 		if($self->{parser}->scan_for_token(['RBRACE'])) {
-			$self->next_token();
+			$self->{parser}->next_token();
 			last;
 		}
 		if($self->{parser}->eof()) {
@@ -1133,6 +1134,37 @@ sub parse {
 		$self->{parser}->error("Did not find expected token after 'include'");
 	}
 	$self->{class} = PuppetParser::Simple->new(parser => $self->{parser});
+}
+
+package PuppetParser::VarAssignment;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['DOLLAR_VAR', 'EQUALS'],
+);
+
+sub patterns {
+	return \@patterns;
+}
+
+sub parse {
+	my ($self) = @_;
+	$self->{varname} = PuppetParser::Simple->new(parser => $self->{parser});
+	if(!$self->{parser}->scan_for_token(['EQUALS'])) {
+		$self->{parser}->error("Did not find expected token '=' after '" . $self->{varname}->{text} . "'");
+	}
+	$self->{parser}->next_token();
+	$self->{value} = [];
+	while(1) {
+		if($self->{parser}->scan_for_token(['COMMENT'], [])) {
+			last;
+		}
+		if($self->{parser}->scan_for_token(['RETURN'], [])) {
+			$self->{parser}->next_token();
+			last;
+		}
+		push @{$self->{value}}, PuppetParser::Simple->new(parser => $self->{parser});
+	}
 }
 
 package main;
