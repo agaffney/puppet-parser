@@ -438,11 +438,11 @@ sub scan_for_value {
 	}
 	if($self->scan_for_token(['LBRACE'])) {
 		# This looks like a hash
-		return PuppetParser::Hash->new(parent => $parent, parser => $self);
+		return PuppetParser::Hash->new(parent => $parent, parser => $self, level => $parent->{level});
 	}
 	if($self->scan_for_token(['LBRACK'])) {
 		# This looks like a list
-		return PuppetParser::List->new(parent => $parent, parser => $self);
+		return PuppetParser::List->new(parent => $parent, parser => $self, level => $parent->{level});
 	}
 	$self->error("Unexpected token '" . $self->cur_token()->{text} . "'");
 }
@@ -742,6 +742,31 @@ sub parse {
 		}
 		$self->{parser}->error("Unexpected token '" . $self->{parser}->cur_token()->{text} . "'");
 	}
+}
+
+sub output {
+	my ($self) = @_;
+	my $max_key_len = 0;
+	for(@{$self->{items}}) {
+		if($_->can('key_len')) {
+			my $key_len = $_->key_len();
+			if($key_len > $max_key_len) {
+				$max_key_len = $key_len;
+			}
+		}
+	}
+	my $buf = '{';
+	if(scalar(@{$self->{items}}) > 0) {
+		$buf .= $self->nl();
+	}
+	for(@{$self->{items}}) {
+		if($_->can('set_max_key_len')) {
+			$_->set_max_key_len($max_key_len);
+		}
+		$buf .= $_->output();
+	}
+	$buf .= (scalar(@{$self->{items}}) > 0 ? $self->indent() : ' ') . '}' . $self->nl();
+	return $buf;
 }
 
 package PuppetParser::Expression;
@@ -1125,7 +1150,9 @@ sub output {
 		$buf .= $self->nl();
 	}
 	for(@{$self->{items}}) {
-		$_->set_max_key_len($max_key_len);
+		if($_->can('set_max_key_len')) {
+			$_->set_max_key_len($max_key_len);
+		}
 		$buf .= $_->output();
 	}
 	$buf .= (scalar(@{$self->{items}}) > 0 ? $self->indent() : ' ') . '}' . $self->nl();
