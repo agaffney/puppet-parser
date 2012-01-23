@@ -832,7 +832,7 @@ sub scan_for_value {
 		$term = ['RETURN', 'COMMENT'];
 	}
 	my $orig_token = $self->get_token_idx();
-	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR'])) {
+	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT'])) {
 		# This looks like a simple value
 		my $value = PuppetParser::Simple->new(parser => $self);
 		if(!$self->scan_for_token($term, [])) {
@@ -934,7 +934,7 @@ sub get_prev_spacing {
 	my ($self, $idx) = @_;
 	my $obj;
 	if($idx < 0) {
-		$obj = $self->{parent};
+		$obj = $self;
 	} else {
 		$obj = $self->get_child($idx);
 	}
@@ -955,12 +955,20 @@ sub indent {
 	return '  ' x $level;
 }
 
+sub nl {
+	return "\n";
+}
+
 sub valid {
 	return 1;
 }
 
 sub output {
-	# This is a shell for simple objects. This will be overriden in more complex types
+	my ($self) = @_;
+	return $self->output_children();
+}
+
+sub output_children {
 	my ($self) = @_;
 	my $buf = '';
 	for(@{$self->{contents}}) {
@@ -970,8 +978,10 @@ sub output {
 }
 
 sub format_output {
-	my ($self) = @_;
-
+	my ($self, $output) = @_;
+#	my $prev_spacing = $self->get_prev_spacing();
+	# Fix this
+	return "\n\n" . $output . "\n\n";
 }
 
 package PuppetParser::Simple;
@@ -1005,6 +1015,13 @@ sub output {
 package PuppetParser::Comment;
 
 our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['COMMENT'],
+);
+
+sub patterns {
+	return \@patterns;
+}
 
 sub parse {
 	my ($self) = @_;
@@ -1012,6 +1029,11 @@ sub parse {
 	$self->{comment} = $token->{text};
 	$self->{comment} =~ s/^[# ]+//;
 	$self->{parser}->next_token();
+}
+
+sub output {
+	my ($self) = @_;
+	return $self->indent() . '# ' . $self->{comment} . $self->nl();
 }
 
 package PuppetParser::List;
@@ -1087,8 +1109,18 @@ sub parse {
 		if($self->{parser}->scan_for_token($self->{term}, [])) {
 			last;
 		}
+		if(PuppetParser::FunctionCall->valid($self->{parser})) {
+			push @{$self->{parts}}, PuppetParser::FunctionCall->new(parent => $self, parser => $self->{parser}, embed => 1);
+			next;
+		}
 		push @{$self->{parts}}, PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
 	}
+}
+
+sub output {
+	my ($self) = @_;
+	my $buf = join(' ', map { $_->output() } @{$self->{parts}});
+	return $buf;
 }
 
 package PuppetParser::KeyValuePair;
@@ -1157,8 +1189,9 @@ sub patterns {
 
 sub output {
 	my ($self) = @_;
-	my $buf = $self->indent() . 'class ' . $self->{classname}->output() . '{';
-	$buf .= '}';
+	my $buf = $self->indent() . 'class ' . $self->{classname}->output() . ' {' . $self->nl();
+	$buf .= $self->output_children();
+	$buf .= '}' . $self->nl();
 	return $buf;
 }
 
@@ -1222,6 +1255,14 @@ sub patterns {
 	return \@patterns;
 }
 
+sub valid {
+	my ($class, $parser) = @_;
+	if($parser->match_token_sequence(['NAME', 'LPAREN'], [])) {
+		return 1;
+	}
+	return 0;
+}
+
 sub parse {
 	my ($self) = @_;
 	$self->{funcname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
@@ -1237,6 +1278,17 @@ sub parse {
 		}
 		push @{$self->{args}}, $self->{parser}->scan_for_value($self, ['COMMA', 'RPAREN']);
 	}
+}
+
+sub output {
+	my ($self) = @_;
+	my $buf = ($self->{embed} ? '' : $self->indent()) . $self->{funcname}->output() . '(';
+	for(@{$self->{args}}) {
+		$buf .= $_->output();
+	}
+	$buf =~ s/, $//;
+	$buf .= ')' . ($self->{embed} ? '' : $self->nl());
+	return $buf;
 }
 
 package PuppetParser::IfStatement;
@@ -1255,14 +1307,10 @@ sub patterns {
 sub parse {
 	my ($self) = @_;
 	$self->{variant} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
-	$self->{condition} = [];
-	while(1) {
-		if($self->{parser}->scan_for_token(['LBRACE'])) {
-			$self->{parser}->next_token();
-			last;
-		}
-		push @{$self->{condition}}, PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+	if(!$self->{parser}->scan_for_token(['LBRACE'], [])) {
+		$self->{condition} = $self->{parser}->scan_for_value($self, ['LBRACE']);
 	}
+	$self->{parser}->next_token();
 	while(1) {
 		if($self->{parser}->scan_for_token(['RBRACE'])) {
 			$self->{parser}->next_token();
@@ -1274,6 +1322,14 @@ sub parse {
 		$self->add_child($self->{parser}->scan_for_object($self));
 	}
 }
+
+sub output {
+	my ($self) = @_;
+	my $buf = $self->indent() . $self->{variant}->output() . (defined $self->{condition} ? (' ' . $self->{condition}->output()) : '') . ' {' . $self->nl();
+	$buf .= $self->output_children();
+	$buf .= $self->indent() . '}' . $self->nl();
+	return $buf;
+};
 
 package PuppetParser::Include;
 
@@ -1293,6 +1349,11 @@ sub parse {
 		$self->{parser}->error("Did not find expected token after 'include'");
 	}
 	$self->{class} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+}
+
+sub output {
+	my ($self) = @_;
+	return $self->indent() . 'include ' . $self->{class}->output() . $self->nl();
 }
 
 package PuppetParser::VarAssignment;
