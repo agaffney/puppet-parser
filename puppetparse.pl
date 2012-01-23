@@ -97,6 +97,7 @@ my @object_classes = (
 	'PuppetParser::VarAssignment',
 	'PuppetParser::Define',
 	'PuppetParser::Comment',
+	'PuppetParser::ResourceRef',
 	'PuppetParser::Newline',
 	# Leave this one at the bottom, so its patterns match last
 #	'PuppetParser::Simple',
@@ -426,6 +427,9 @@ sub scan_for_value {
 		$term = ['RETURN', 'COMMENT'];
 	}
 	my $orig_token = $self->get_token_idx();
+	if(PuppetParser::ResourceRef->valid($self)) {
+		return PuppetParser::ResourceRef->new(parent => $parent, parser => $self);
+	}
 	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT'])) {
 		# This looks like a simple value
 		my $value = PuppetParser::Simple->new(parser => $self);
@@ -672,6 +676,48 @@ sub parse {
 sub output {
 	my ($self) = @_;
 	return $self->indent() . '# ' . $self->{comment} . $self->nl();
+}
+
+package PuppetParser::ResourceRef;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['CLASSREF'],
+);
+
+sub patterns {
+	return \@patterns;
+}
+
+sub valid {
+	my ($class, $parser) = @_;
+	my $orig_token = $parser->get_token_idx();
+	if($parser->scan_for_token(['CLASSREF'], [])) {
+		$parser->next_token();
+		if($parser->scan_for_token(['LBRACK'], [])) {
+			$parser->next_token();
+			if($parser->scan_for_token(['NAME', 'SQUOTES', 'DQUOTES', 'DOLLAR_VAR'], [])) {
+				$parser->set_token_idx($orig_token);
+				return 1;
+			}
+		}
+	}
+	$parser->set_token_idx($orig_token);
+	return 0;
+}
+
+sub parse {
+	my ($self) = @_;
+	$self->{restype} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+	$self->{parser}->next_token();
+	$self->{inner} = $self->{parser}->scan_for_value($self, ['RBRACK']);
+	$self->{parser}->next_token();
+}
+
+sub output {
+	my ($self) = @_;
+	my $buf = $self->{restype}->output() . '[' . $self->{inner}->output() . ']';
+	return $buf;
 }
 
 package PuppetParser::List;
