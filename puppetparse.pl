@@ -72,13 +72,9 @@ my @tokens = (
 	"MATCH" => '=~',
 	"NOMATCH" => '!~',
 	"CLASSREF" => '((::){0,1}[A-Z][-\w]*)+',
-	"NUMBER", '\b(?:0[xX][0-9A-Fa-f]+|0?\d+(?:\.\d+)?(?:[eE]-?\d+)?)\b',
-	"NAME", '((::)?[a-z0-9][-\w]*)(::[a-z0-9][-\w]*)*',
-	new Parse::Token::Simple(Name => "COMMENT", Regex => '#.*', Sub => sub {
-		my ($token, $string) = @_;
-		$string =~ s/^[# ]+//;
-		return $string;
-	}),
+	"NUMBER" => '\b(?:0[xX][0-9A-Fa-f]+|0?\d+(?:\.\d+)?(?:[eE]-?\d+)?)\b',
+	"NAME" => '((::)?[a-z0-9][-\w]*)(::[a-z0-9][-\w]*)*',
+	"COMMENT" => '#.*',
 	new Parse::Token::Delimited(Name => 'MLCOMMENT', Start => '/[*]', End => '[*]/' ),
 #	"MLCOMMENT", qw(/\*(.*?)\*/), #m
 	"RETURN", '\n',
@@ -101,8 +97,9 @@ my @object_classes = (
 	'PuppetParser::VarAssignment',
 	'PuppetParser::Define',
 	'PuppetParser::Comment',
+	'PuppetParser::Newline',
 	# Leave this one at the bottom, so its patterns match last
-	'PuppetParser::Simple',
+#	'PuppetParser::Simple',
 );
 my $default_object_class = 'PuppetParser::Simple';
 
@@ -153,6 +150,7 @@ sub output {
 sub error {
 	my ($self, $msg) = @_;
 	print STDERR "ERROR: ${msg} on line " . $self->cur_token()->{line} . " in file " . $self->{file} . "\n";
+	$self->show_call_stack();
 	exit 1;
 }
 
@@ -213,9 +211,25 @@ sub cur_token {
 	return defined($self->{parsed_tokens}->[$self->{token_idx}]) ? $self->{parsed_tokens}->[$self->{token_idx}] : undef;
 }
 
+sub show_call_stack {
+	my ($self) = @_;
+	my ( $path, $line, $subr );
+	my $max_depth = 30;
+	my $i = 1;
+	print "--- Begin stack trace ---\n";
+	while ( (my @call_details = (caller($i++))) && ($i<$max_depth) ) {
+		print "$call_details[1] line $call_details[2] in function $call_details[3]\n";
+	}
+	print "--- End stack trace ---\n";
+}
+
 sub next_token {
 	my ($self) = @_;
 	$self->{token_idx}++;
+#	if($self->cur_token()->{type} eq 'COMMENT') {
+#		print "next_token(): Found a comment - " . $self->cur_token()->{text} . "\n";
+#		$self->show_call_stack();
+#	}
 	return $self->cur_token();
 }
 
@@ -342,6 +356,7 @@ sub match_token_sequence {
 		$cur_token = $self->cur_token();
 		for(@{$ignore}) {
 			if($cur_token->{type} eq $_) {
+				print "match_token_sequence(): skipping token type " . $cur_token->{type} . "\n";
 				# The next token is of a type we want to ignore
 				$cur_token = $self->next_token();
 				next TYPE;
@@ -389,13 +404,9 @@ sub scan_for_object {
 	print "Content:->", $token->{text}, "<-\n";
 	my $orig_token = $self->get_token_idx();
 	my $cur_token = undef;
-	if($self->scan_for_token(['RETURN'], [])) {
-		$self->next_token();
-		return PuppetParser::Simple->new(parent => $parent, parser => $self);;
-	}
 	PACKAGE: for my $package (@object_classes) {
 		PATTERN: for my $pattern (@{$package->patterns()}) {
-			if($self->match_token_sequence($pattern, ['RETURN'])) {
+			if($self->match_token_sequence($pattern, [])) {
 				if($package->valid($self)) {
 					return $package->new(parent => $parent, parser => $self);
 				} else {
@@ -490,6 +501,20 @@ sub parse {
 	return;
 }
 
+sub parse_children {
+	my ($self) = @_;
+	while(1) {
+		if($self->{parser}->scan_for_token(['RBRACE'], [])) {
+			$self->{parser}->next_token();
+			last;
+		}
+		if($self->{parser}->eof()) {
+			$self->{parser}->error("Unexpected end of file");
+		}
+		$self->add_child($self->{parser}->scan_for_object($self));
+	}
+}
+
 sub parent {
 	my ($self) = @_;
 	return $self->{parent};
@@ -548,24 +573,33 @@ sub valid {
 
 sub output {
 	my ($self) = @_;
-#	return $self->output_children();
 	return $self->indent() . "<Placeholder for " . $self . ">" . $self->nl();
 }
 
 sub output_children {
 	my ($self) = @_;
 	my $buf = '';
-	for(@{$self->{contents}}) {
-		$buf .= $_->output();
+	if($self->{inner_spacing}) {
+		$buf .= "\n";
 	}
+	for(@{$self->{contents}}) {
+		my $child_output .= $_->output();
+		if($_->{outer_spacing}) {
+			if($buf !~ /^\n*$/) {
+				$child_output = "\n" . $child_output;
+			}
+			$child_output .= "\n";
+		}
+		$buf .= $child_output;
+	}
+	if($self->{inner_spacing}) {
+		$buf .= "\n";
+	}
+	# Formatting fixups
+	$buf =~ s/\n{3,}/\n\n/gs;
+	$buf =~ s/}\n\n\s*else /} else /gs;
+	$buf =~ s/}\n\n\s*elsif /} else /gs;
 	return $buf;
-}
-
-sub format_output {
-	my ($self, $output) = @_;
-#	my $prev_spacing = $self->get_prev_spacing();
-	# Fix this
-	return "\n\n" . $output . "\n\n";
 }
 
 package PuppetParser::Simple;
@@ -594,6 +628,26 @@ sub output {
 	# This is a shell for simple objects. This will be overriden in more complex types
 	my ($self) = @_;
 	return defined $self->{text} ? $self->{text} : '';
+}
+
+package PuppetParser::Newline;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['RETURN'],
+);
+
+sub patterns {
+	return \@patterns;
+}
+
+sub parse {
+	my ($self) = @_;
+	$self->{parser}->next_token();
+}
+
+sub output {
+	return '';
 }
 
 package PuppetParser::Comment;
@@ -760,13 +814,14 @@ package PuppetParser::Class;
 use Data::Dumper;
 
 our @ISA = 'PuppetParser::Object';
-our %defaults = (
-	inner_spacing => 1,
-	outer_spacing => 1,
-);
 our @patterns = (
 	['CLASS'],
 );
+
+sub apply_defaults {
+	my ($self) = @_;
+	$self->SUPER::apply_defaults({ inner_spacing => 1, outer_spacing => 1 });
+}
 
 sub parse {
 	my ($self) = @_;
@@ -779,16 +834,7 @@ sub parse {
 		$self->{parser}->error("Did not find expected token '{'");
 	}
 	$self->{parser}->next_token();
-	while(1) {
-		if($self->{parser}->scan_for_token(['RBRACE'])) {
-			$self->{parser}->next_token();
-			last;
-		}
-		if($self->{parser}->eof()) {
-			$self->{parser}->error("Unexpected end of file");
-		}
-		$self->add_child($self->{parser}->scan_for_object($self));
-	}
+	$self->parse_children();
 }
 
 sub patterns {
@@ -809,6 +855,11 @@ our @ISA = 'PuppetParser::Object';
 our @patterns = (
 	['DEFINE'],
 );
+
+sub apply_defaults {
+	my ($self) = @_;
+	$self->SUPER::apply_defaults({ inner_spacing => 1, outer_spacing => 1 });
+}
 
 sub patterns {
 	return \@patterns;
@@ -840,16 +891,7 @@ sub parse {
 		$self->{parser}->error("Unexpected token");
 	}
 	$self->{parser}->next_token();
-	while(1) {
-		if($self->{parser}->scan_for_token(['RBRACE'])) {
-			$self->{parser}->next_token();
-			last;
-		}
-		if($self->{parser}->eof()) {
-			$self->{parser}->error("Unexpected end of file");
-		}
-		$self->add_child($self->{parser}->scan_for_object($self));
-	}
+	$self->parse_children();
 }
 
 sub output {
@@ -893,9 +935,13 @@ sub parse {
 	$self->{parser}->next_token();
 	$self->{args} = [];
 	while(1) {
-		if($self->{parser}->scan_for_token(['RPAREN'])) {
+		if($self->{parser}->scan_for_token(['RPAREN'], [])) {
 			$self->{parser}->next_token();
 			last;
+		}
+		if($self->{parser}->scan_for_token(['COMMA'], [])) {
+			$self->{parser}->next_token();
+			next;
 		}
 		push @{$self->{args}}, $self->{parser}->scan_for_value($self, ['COMMA', 'RPAREN']);
 	}
@@ -921,6 +967,11 @@ our @patterns = (
 	['ELSE'],
 );
 
+sub apply_defaults {
+	my ($self) = @_;
+	$self->SUPER::apply_defaults({ inner_spacing => 0, outer_spacing => 1 });
+}
+
 sub patterns {
 	return \@patterns;
 }
@@ -932,16 +983,7 @@ sub parse {
 		$self->{condition} = $self->{parser}->scan_for_value($self, ['LBRACE']);
 	}
 	$self->{parser}->next_token();
-	while(1) {
-		if($self->{parser}->scan_for_token(['RBRACE'])) {
-			$self->{parser}->next_token();
-			last;
-		}
-		if($self->{parser}->eof()) {
-			$self->{parser}->error("Unexpected end of file");
-		}
-		$self->add_child($self->{parser}->scan_for_object($self));
-	}
+	$self->parse_children();
 }
 
 sub output {
@@ -996,6 +1038,7 @@ sub parse {
 	}
 	$self->{parser}->next_token();
 	$self->{value} = $self->{parser}->scan_for_value($self, ['RETURN']);
+	$self->{parser}->next_token();
 }
 
 sub output {
@@ -1015,6 +1058,11 @@ our @res_title_patterns = (
 	['DQUOTES', 'COLON'],
 	['LBRACK'],
 );
+
+sub apply_defaults {
+	my ($self) = @_;
+	$self->SUPER::apply_defaults({ inner_spacing => 1, outer_spacing => 1 });
+}
 
 sub patterns {
 	return \@patterns;
@@ -1038,8 +1086,7 @@ sub parse {
 			next TOKEN;
 		}
 		if($self->{parser}->scan_for_token(['COMMENT'], ['RETURN'])) {
-			# I don't know what to do with this yet, but we're looking for it anyway
-			$self->{parser}->next_token();
+			push @{$self->{items}}, PuppetParser::Comment->new(parent => $self, parser => $self->{parser});
 			next TOKEN;
 		}
 		if($self->{parser}->scan_for_token(['COMMA'], [])) {
