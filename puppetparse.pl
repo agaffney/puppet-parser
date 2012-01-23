@@ -95,6 +95,7 @@ my @object_classes = (
 	'PuppetParser::FunctionCall',
 	'PuppetParser::IfStatement',
 	'PuppetParser::VarAssignment',
+	'PuppetParser::CaseStatement',
 	'PuppetParser::Define',
 	'PuppetParser::Comment',
 	'PuppetParser::ResourceRef',
@@ -838,6 +839,24 @@ sub output {
 	my ($self) = @_;
 	my $buf = join(' ', map { $_->output() } @{$self->{parts}});
 	return $buf;
+}
+
+package PuppetParser::CaseStatement;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['CASE'],
+);
+
+sub patterns {
+	return \@patterns;
+}
+
+sub parse {
+	my ($self) = @_;
+	$self->{parser}->next_token();
+	$self->{casevar} = $self->{parser}->scan_for_value(['LBRACE']);
+	$self->{parser}->next_token();
 }
 
 package PuppetParser::KeyValuePair;
