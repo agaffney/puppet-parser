@@ -106,27 +106,6 @@ my @object_classes = (
 );
 my $default_object_class = 'PuppetParser::Simple';
 
-my @parse_patterns = (
-	{
-		patterns => [['CASE']],
-		func => 'parse_case',
-	},
-	{
-		patterns => [
-			['SQUOTES', 'COLON', 'LBRACE'],
-			['DQUOTES', 'COLON', 'LBRACE'],
-			['NAME', 'COLON', 'LBRACE'],
-			['REGEX', 'COLON', 'LBRACE'],
-			['DEFAULT', 'COLON', 'LBRACE'],
-		],
-		func => 'parse_case_condition',
-	},
-	{
-		patterns => [['NAME', 'LBRACK']],
-		func => 'parse_resource_override',
-	},
-);
-
 sub new {
 	my($class, %args) = @_;
 	my $self = {
@@ -161,7 +140,7 @@ sub output_json {
 
 sub output {
 	my ($self, $output) = @_;
-	my $buffer = $self->{tree}->output();
+	my $buffer = $self->{tree}->output_children();
 	if(defined $output && $output ne '') {
 		open FOO, "> $output" or die "Could not open output file $output: $!";
 		print FOO $buffer;
@@ -169,27 +148,6 @@ sub output {
 	} else {
 		print $buffer;
 	}
-}
-
-sub output_object {
-	my ($self, $obj, $embed) = @_;
-	$embed = 0 if(!defined $embed);
-#	print Dumper($obj);
-	my $func_name = 'output_' . $obj->{type};
-	if(PuppetParser->can($func_name)) {
-		print "output_object(): calling $func_name()\n";
-		return $self->$func_name($obj, $embed);
-	} else {
-		print "output_object(): calling output_simple() instead of $func_name()\n";
-		return $self->output_simple($obj, $embed);
-	}
-}
-
-sub output_simple {
-	my ($self, $obj) = @_;
-	my $buf = '';
-	$buf .= $obj->{text};
-	return $buf;
 }
 
 sub error {
@@ -237,12 +195,9 @@ sub read_tokens {
 			last;
 		}
 		push(@{$self->{parsed_tokens}}, { line => $self->{lexer}->line, type => $self->transform_token_type($token->name, $token->text), text => $token->text });
-#		print "Type: " . $token->name . ", Text: " . $token->text . "\n";
-#		print "Line: " . $self->{lexer}->line . "\n";
 	}
 	$self->{num_parsed_tokens} = scalar(@{$self->{parsed_tokens}});
 	$self->{token_idx} = 0;
-#	print "num_parsed_tokens=$num_parsed_tokens, token_idx=$token_idx\n";
 }
 
 sub eof {
@@ -255,7 +210,6 @@ sub eof {
 
 sub cur_token {
 	my ($self) = @_;
-#	print "cur_token(): token_idx=" . $self->{token_idx} . "\n";
 	return defined($self->{parsed_tokens}->[$self->{token_idx}]) ? $self->{parsed_tokens}->[$self->{token_idx}] : undef;
 }
 
@@ -280,251 +234,6 @@ sub get_token_idx {
 sub set_token_idx {
 	my ($self, $idx) = @_;
 	$self->{token_idx} = $idx;
-}
-
-sub max_key_length {
-	my ($self, $values) = @_;
-	my $max_key_len = 0;
-	for my $foo (@{$values}) {
-		if(length($foo->{name}) > $max_key_len) {
-			$max_key_len = length($foo->{name});
-		}
-	}
-	return $max_key_len;
-}
-
-sub output_class {
-	my ($self, $obj) = @_;
-	my $buf = $self->indent() . 'class ' . $obj->{name} . ' {' . $self->newline(2);
-	$self->{indent}++;
-	for my $child (@{$obj->{contents}}) {
-		$buf .= $self->output_object($child);
-	}
-	$buf .= "\n}\n";
-	$self->{indent}--;
-	return $buf;
-}
-
-sub parse_define {
-	my ($self) = @_;
-	my $obj = { type => 'define', args => [], contents => [] };
-	$obj->{name} = $self->next_token()->{text};
-	$self->next_token();
-	while(my $token = $self->cur_token()) {
-		if($token->{type} eq 'LBRACE') {
-			$self->next_token();
-			last;
-		}
-		if($token->{type} eq 'LPAREN') {
-			# Beginning of arguments
-			$self->next_token();
-			next;
-		}
-		if($token->{type} eq 'RPAREN') {
-			# End of arguments
-			$self->next_token();
-			next;
-		}
-		push @{$obj->{args}}, $self->parse_value(['COMMA', 'RPAREN']);
-#		if($self->cur_token()->{type} eq 'RPAREN') {
-#			$self->next_token();
-#		}
-		$self->next_token();
-	}
-	$self->add_to_parent($obj);
-}
-
-sub output_define {
-	my ($self, $obj) = @_;
-	my $buf = $self->indent() . 'define ' . $obj->{name};
-		$buf .= '(';
-	if(scalar(@{$obj->{args}})) {
-		my @items;
-		for my $foo (@{$obj->{args}}) {
-			my $tmp = '';
-			for (@{$foo}) {
-				if($tmp ne '') {
-					$tmp .= ' ';
-				}
-				$tmp .= $self->output_object($_);
-			}
-			push @items, $tmp;
-		}
-		$buf .= join(', ', @items);
-	}
-	$buf .= ')';
-	$buf .= ' {' . $self->newline();
-	$self->{indent}++;
-	for my $child (@{$obj->{contents}}) {
-		$buf .= $self->output_object($child);
-	}
-	$self->{indent}--;
-	$buf .= "\n" . $self->indent() . '}' . "\n";
-}
-
-sub output_func_call {
-	my ($self, $obj, $embed) = @_;
-	my $buf = $embed ? '' : ($self->newline() . $self->indent());
-	$buf .= $obj->{name} . '(';
-	for my $arg (@{$obj->{args}}) {
-		$buf .= $self->output_object($arg);
-	}
-	$buf .= ')' . ($embed ? '' : $self->newline());
-	return $buf;
-}
-
-sub output_include {
-	my ($self, $obj) = @_;
-	return $self->indent() . 'include ' . $obj->{class} . $self->newline();
-}
-
-sub parse_hash {
-	my ($self) = @_;
-	my $obj = { type => 'hash', attribs => [] };
-	$self->next_token(); # LBRACE
-	while(my $token = $self->cur_token()) {
-		if($token->{type} eq 'RETURN' || $token->{type} eq 'COMMENT') {
-			$self->next_token();
-			next;
-		}
-		if($self->cur_token()->{type} eq 'RBRACE') {
-			last;
-		}
-		my $attr = { name => $token->{text} };
-		$self->next_token(); # FARROW
-		$self->next_token();
-		$attr->{value} = $self->parse_value(['COMMA', 'SEMIC', 'RBRACE']);
-		push @{$obj->{attribs}}, $attr;
-		$self->next_token();
-	}
-	return $obj;
-}
-
-sub output_hash {
-	my ($self, $obj) = @_;
-	my $buf = '{' . "\n";
-	$self->{indent}++;
-	my $max_key_len = $self->max_key_length($obj->{attribs});
-	for my $attr (@{$obj->{attribs}}) {
-		$buf .= $self->indent() . sprintf("%-${max_key_len}s", $attr->{name}) . ' => ';
-		#	. $self->output_object($attr->{value}) . ',' . "\n"
-		my $tmp = '';
-		for (@{$attr->{value}}) {
-			if($tmp ne '') {
-				$tmp .= ' ';
-			}
-			$tmp .= $self->output_object($_);
-		}
-		$buf .= $tmp . ',' . "\n";
-	}
-	$self->{indent}--;
-	$buf .= $self->indent() . '}' . "\n";
-	return $buf;
-}
-
-sub parse_list {
-	my ($self) = @_;
-	my $obj = { type => 'list', contents => [] };
-	my $tmpvalue;
-	$self->next_token();
-	while(my $token = $self->cur_token()) {
-		if($token->{type} eq 'RETURN' || $token->{type} eq 'COMMENT') {
-			$self->next_token();
-			next;
-		}
-		if($token->{type} eq 'RBRACK') {
-			$self->next_token();
-			last;
-		}
-		push @{$obj->{contents}}, $self->parse_value(['COMMA', 'RBRACK']);
-		if($self->cur_token()->{type} eq 'RBRACK') {
-			$self->next_token();
-			last;
-		}
-		$self->next_token();
-	}
-	return $obj;
-}
-
-sub output_list {
-	my ($self, $obj, $embed) = @_;
-#	print Dumper($obj);
-	my $buf = '[';
-	$self->{indent}++;
-	my $numitems = scalar(@{$obj->{contents}});
-	my $split = ($numitems > 4);
-	my @items;
-	for my $foo (@{$obj->{contents}}) {
-		my $tmp = '';
-		for (@{$foo}) {
-			if($tmp ne '') {
-				$tmp .= ' ';
-			}
-			$tmp .= $self->output_object($_);
-		}
-		push @items, $tmp;
-	}
-	$buf .= ($split ? $self->newline() . $self->indent() : '' ) . join(($split ? ',' . $self->newline() . $self->indent() : ', '), @items);
-	$self->{indent}--;
-	$buf .= ($split ? $self->newline() . $self->indent() : '') . ']';
-	return $buf;
-}
-
-sub parse_value {
-	# This function advances to the next token automatically
-	my ($self, $until) = @_;
-	if(!defined $until) {
-		$until = ['RETURN'];
-	}
-	my $cur_token = $self->cur_token();
-	if($cur_token->{type} eq 'LBRACE') {
-		# Hash
-		return [ $self->parse_hash() ];
-	} elsif($cur_token->{type} eq 'LBRACK') {
-		# List
-		return [ $self->parse_list() ];
-	} else {
-		if($self->match_token_sequence(['DOLLAR_VAR', 'QMARK', 'LBRACE'])) {
-			# This looks like a selector
-			return [ $self->parse_selector() ];
-		} else {
-			# This is probably just an expression
-			my $tmp = [];
-			TOKEN: while(my $token = $self->cur_token()) {
-				for(@{$until}) {
-					if($token->{type} eq $_) {
-						last TOKEN;
-					}
-				}
-				push @{$tmp}, { type => uc($token->{type}), text => $token->{text} };
-				$self->next_token();
-			}
-			return $tmp;
-		}
-	}
-	print "Oh noes...we fell off the end!\n";
-	print "parse_value(): type=" . $cur_token->{type} . ", text=" . $cur_token->{text} . "\n";
-	return undef;
-}
-
-sub parse_var_assignment {
-	my ($self) = @_;
-	my $cur_token = $self->cur_token();
-	my $obj = { type => 'var_assignment', name => $cur_token->{text}, value => undef };
-	$self->next_token(); # equals sign
-	$self->next_token();
-	$obj->{value} = $self->parse_value();
-	$self->add_to_parent($obj);
-}
-
-sub output_var_assignment {
-	my ($self, $obj) = @_;
-	my $buf = "\n";
-	$buf .= $self->indent() . $obj->{name} . ' = ';
-	for my $foo (@{$obj->{value}}) {
-		$buf .= $self->output_object($foo);
-	}
-	return $buf;
 }
 
 sub parse_case {
@@ -586,102 +295,6 @@ sub output_case_condition {
 	return $buf;
 }
 
-sub parse_comment {
-	my ($self) = @_;
-	my $cur_token = $self->cur_token();
-	$self->add_to_parent({ type => 'comment', value => $cur_token->{text} });
-}
-
-sub output_comment {
-	my ($self, $obj, $embed) = @_;
-	return $self->indent() . '# ' . $obj->{value} . $self->newline();
-}
-
-sub parse_resource {
-	# Is this a resource definition or an override?
-	my ($self) = @_;
-	my @definition_patterns = (
-		['NAME', 'LBRACE', 'SQUOTES', 'COLON'],
-		['NAME', 'LBRACE', 'DQUOTES', 'COLON'],
-		['NAME', 'LBRACE', 'DOLLAR_VAR', 'COLON'],
-		['NAME', 'LBRACE', 'LBRACK'],
-	);
-	for my $pattern (@definition_patterns) {
-		if($self->match_token_sequence($pattern)) {
-			$self->parse_resource_definition();
-			return;
-		}
-	}
-	$self->parse_resource_defaults();
-}
-
-sub parse_resource_definition {
-	my ($self) = @_;
-	my @key_value_patterns = (
-		['NAME', 'FARROW'],
-		['DQUOTES', 'FARROW'],
-		['SQUOTES', 'FARROW'],
-	);
-	my @res_title_patterns = (
-		['DOLLAR_VAR', 'COLON'],
-		['SQUOTES', 'COLON'],
-		['DQUOTES', 'COLON'],
-		['LBRACK'],
-	);
-	my $cur_token = $self->cur_token();
-	my $restype = $cur_token->{text};
-	$self->next_token(); # LBRACE
-	RES: while(1) {
-		my $obj = { type => 'resource_definition', restype => $restype, title => '', attribs => [] };
-		while(my $token = $self->cur_token()) {
-			if($token->{type} eq 'RETURN' || $token->{type} eq 'COMMENT') {
-				$self->next_token();
-				next;
-			}
-			# Is this a key => value pair?
-			for my $pattern (@key_value_patterns) {
-				if($self->match_token_sequence($pattern)) {
-					# This is a key => value pair
-					my $attr = { name => $token->{text} };
-					$self->next_token(); # FARROW
-					$self->next_token();
-					$attr->{value} = $self->parse_value(['COMMA', 'SEMIC', 'RBRACE']);
-					push @{$obj->{attribs}}, $attr;
-					if($self->cur_token()->{type} eq 'RBRACE') {
-						$self->add_to_parent($obj);
-						last RES;
-					}
-				}
-			}
-			# Is this a resource title?
-			for my $pattern (@res_title_patterns) {
-				if($self->match_token_sequence($pattern)) {
-					# This is a resource title
-					if($obj->{'title'} eq '') {
-						if($self->match_token_sequence(['DOLLAR_VAR', 'COLON'])) {
-							$obj->{title} = [ $self->cur_token() ];
-							$self->next_token();
-						} else {
-							$obj->{title} = $self->parse_value(['COLON']);
-							#$self->next_token();
-						}
-						next;
-					} else {
-						$self->add_to_parent($obj);
-						next RES;
-					}
-				}
-			}
-			if($self->cur_token()->{type} eq 'RBRACE') {
-				$self->add_to_parent($obj);
-				last RES;
-			}
-			# Looking for key => value pairs
-			$self->next_token();
-		}
-	}
-}
-
 sub output_resource_definition {
 	my ($self, $obj) = @_;
 	my $buf = $self->newline() . $self->indent() . $obj->{restype} . ' { ';
@@ -718,35 +331,6 @@ sub output_resource_definition {
 	return $buf;
 }
 
-sub parse_resource_defaults {
-	my ($self) = @_;
-}
-
-sub parse_resource_override {
-	my ($self) = @_;
-}
-
-sub output_if {
-	my ($self, $obj) = @_;
-	my $buf = '';
-	if($obj->{variant} eq 'if' || $obj->{variant} eq 'elsif') {
-		$buf .= "\n" . $self->indent() . $obj->{variant} . ' ';
-		for my $foo (@{$obj->{condition}}) {
-			$buf .= $self->output_simple($foo) . ' ';
-		}
-	} elsif($obj->{variant} eq 'else') {
-		$buf .= ' else';
-	}
-	$buf .= ' {' . "\n";
-	$self->{indent}++;
-	for my $child (@{$obj->{contents}}) {
-		$buf .= $self->output_object($child);
-	}
-	$self->{indent}--;
-	$buf .= "\n" . $self->indent() . '}';
-	return $buf;
-}
-
 sub match_token_sequence {
 	my ($self, $seq, $ignore) = @_;
 	if(!defined $ignore) {
@@ -763,7 +347,6 @@ sub match_token_sequence {
 				next TYPE;
 			}
 		}
-#		print "Looking for token of type: $type, Next is of type: " . $cur_token_type . ", value: " . $cur_token->{text} . "\n";
 		if($cur_token->{type} ne $type) {
 			$self->set_token_idx($orig_token);
 			return 0;
@@ -965,7 +548,8 @@ sub valid {
 
 sub output {
 	my ($self) = @_;
-	return $self->output_children();
+#	return $self->output_children();
+	return $self->indent() . "<Placeholder for " . $self . ">" . $self->nl();
 }
 
 sub output_children {
@@ -1069,6 +653,14 @@ sub parse {
 	}
 }
 
+sub output {
+	my ($self) = @_;
+	my $buf = '[';
+	$buf .= join(', ', map { $_->output() } @{$self->{items}} );
+	$buf .= ']';
+	return $buf;
+}
+
 package PuppetParser::Hash;
 
 our @ISA = 'PuppetParser::Object';
@@ -1140,12 +732,28 @@ sub valid {
 	return 0;
 }
 
+sub key_len {
+	my ($self) = @_;
+	return length($self->{key}->output());
+}
+
+sub set_max_key_len {
+	my ($self, $len) = @_;
+	$self->{max_key_len} = $len;
+}
+
 sub parse {
 	my ($self) = @_;
 	$self->{key} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
 	$self->{parser}->next_token();
 	$self->{value} = $self->{parser}->scan_for_value($self, ['COMMA', 'SEMIC', 'RETURN', 'RBRACE']);
 }
+
+sub output {
+	my ($self) = @_;
+	my $buf = $self->indent() . sprintf('%-' . $self->{max_key_len} . 's', $self->{key}->output()) . ' => ' . $self->{value}->output() . ',' . $self->nl();
+	return $buf;
+} 
 
 package PuppetParser::Class;
 
@@ -1242,6 +850,19 @@ sub parse {
 		}
 		$self->add_child($self->{parser}->scan_for_object($self));
 	}
+}
+
+sub output {
+	my ($self) = @_;
+	my $buf = $self->indent() . 'define ' . $self->{defname}->output() . '(';
+	for(@{$self->{args}}) {
+		$buf .= $_->output() . ', ';
+	}
+	$buf =~ s/, $//;
+	$buf .= ') {' . $self->nl();
+	$buf .= $self->output_children();
+	$buf .= $self->indent() . '}' . $self->nl();
+	return $buf;
 }
 
 package PuppetParser::FunctionCall;
@@ -1374,8 +995,12 @@ sub parse {
 		$self->{parser}->error("Did not find expected token '=' after '" . $self->{varname}->{text} . "'");
 	}
 	$self->{parser}->next_token();
-	$self->{value} = [];
 	$self->{value} = $self->{parser}->scan_for_value($self, ['RETURN']);
+}
+
+sub output {
+	my ($self) = @_;
+	return $self->indent() . $self->{varname}->output() . ' = ' . $self->{value}->output() . $self->nl();
 }
 
 package PuppetParser::Resource;
@@ -1383,11 +1008,6 @@ package PuppetParser::Resource;
 our @ISA = 'PuppetParser::Object';
 our @patterns = (
 	['NAME', 'LBRACE'],
-);
-our @key_value_patterns = (
-	['NAME', 'FARROW'],
-	['DQUOTES', 'FARROW'],
-	['SQUOTES', 'FARROW'],
 );
 our @res_title_patterns = (
 	['DOLLAR_VAR', 'COLON'],
@@ -1408,7 +1028,7 @@ sub parse {
 	}
 	$self->{parser}->next_token();
 	TOKEN: while(1) {
-		if($self->{parser}->scan_for_token(['RBRACE'])) {
+		if($self->{parser}->scan_for_token(['RBRACE'], [])) {
 			$self->{parser}->next_token();
 			last TOKEN;
 		}
@@ -1422,7 +1042,7 @@ sub parse {
 			$self->{parser}->next_token();
 			next TOKEN;
 		}
-		if($self->{parser}->scan_for_token(['COMMA'])) {
+		if($self->{parser}->scan_for_token(['COMMA'], [])) {
 			$self->{parser}->next_token();
 			next TOKEN;
 		}
@@ -1434,18 +1054,35 @@ sub parse {
 				next TOKEN;
 			}
 		}
-		for my $pattern (@key_value_patterns) {
-			if($self->{parser}->match_token_sequence($pattern)) {
-				# It's a key/value pair
-				my $key = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
-				$self->{parser}->next_token();
-				# Parse the value
-				$self->{value} = $self->{parser}->scan_for_value($self, ['COMMA', 'SEMIC', 'RETURN', 'RBRACE']);
-				next TOKEN;
-			}
+		if(PuppetParser::KeyValuePair->valid($self->{parser})) {
+			push @{$self->{items}}, PuppetParser::KeyValuePair->new(parent => $self, parser => $self->{parser});
+			next TOKEN;
 		}
 		$self->{parser}->error("Unexpected token '" . $self->{parser}->cur_token()->{text} . "'");
 	}
+}
+
+sub output {
+	my ($self) = @_;
+	my $max_key_len = 0;
+	for(@{$self->{items}}) {
+		if($_->can('key_len')) {
+			my $key_len = $_->key_len();
+			if($key_len > $max_key_len) {
+				$max_key_len = $key_len;
+			}
+		}
+	}
+	my $buf = $self->indent() . $self->{restype}->output() . ' { ' . $self->{restitle}->output() . ':';
+	if(scalar(@{$self->{items}}) > 0) {
+		$buf .= $self->nl();
+	}
+	for(@{$self->{items}}) {
+		$_->set_max_key_len($max_key_len);
+		$buf .= $_->output();
+	}
+	$buf .= (scalar(@{$self->{items}}) > 0 ? $self->indent() : ' ') . '}' . $self->nl();
+	return $buf;
 }
 
 package main;
