@@ -408,9 +408,9 @@ sub scan_for_token {
 sub scan_for_object {
 	my ($self, $parent) = @_;
 	my $token = $self->cur_token();
-#	print "Line: ", $token->{line}, ", ";
-#	print "Type: ", $token->{type}, ", ";
-#	print "Content:->", $token->{text}, "<-\n";
+	print "Line: ", $token->{line}, ", ";
+	print "Type: ", $token->{type}, ", ";
+	print "Content:->", $token->{text}, "<-\n";
 	my $orig_token = $self->get_token_idx();
 	my $cur_token = undef;
 	PACKAGE: for my $package (@object_classes) {
@@ -1219,7 +1219,7 @@ sub patterns {
 sub valid {
 	my ($class, $parser, $parent) = @_;
 	my $token = $parser->cur_token();
-	if($token->{text} =~ /^(include|import|realize)$/) {
+	if($token->{text} eq 'realize') {
 		return 1;
 	}
 	return $class->SUPER::valid($parser, $parent);
@@ -1243,9 +1243,13 @@ sub parse {
 	}
 	$self->{args} = [];
 	while(1) {
-		if($self->{bare} && $self->{parser}->scan_for_token(['RETURN'], [])) {
+		if($self->{parser}->scan_for_token(['RETURN'], [])) {
 			$self->{parser}->next_token();
-			last;
+			if($self->{bare}) {
+				last;
+			} else {
+				next;
+			}
 		}
 		if($self->{parser}->scan_for_token(['RPAREN'], [])) {
 			$self->{parser}->next_token();
@@ -1255,7 +1259,7 @@ sub parse {
 			$self->{parser}->next_token();
 			next;
 		}
-		push @{$self->{args}}, $self->{parser}->scan_for_value($self, ['COMMA', 'RPAREN']);
+		push @{$self->{args}}, $self->{parser}->scan_for_value($self, ['COMMA', 'RPAREN', 'RETURN']);
 	}
 }
 
@@ -1263,7 +1267,7 @@ sub output {
 	my ($self) = @_;
 	my $buf = ($self->{embed} ? '' : $self->indent()) . $self->{funcname}->output() . '(';
 	for(@{$self->{args}}) {
-		$buf .= $_->output();
+		$buf .= $_->output() . ', ';
 	}
 	$buf =~ s/, $//;
 	$buf .= ')' . ($self->{embed} ? '' : $self->nl());
@@ -1311,6 +1315,7 @@ package PuppetParser::Include;
 our @ISA = 'PuppetParser::Object';
 our @patterns = (
 	['INCLUDE'],
+	['IMPORT'],
 );
 
 sub patterns {
@@ -1319,8 +1324,8 @@ sub patterns {
 
 sub parse {
 	my ($self) = @_;
-	$self->{parser}->next_token();
-	if(!$self->{parser}->scan_for_token(['NAME', 'DOLLAR_VAR'])) {
+	$self->{funcname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+	if(!$self->{parser}->scan_for_token(['NAME', 'DOLLAR_VAR', 'SQUOTES', 'DQUOTES'])) {
 		print "Type=" . $self->{parser}->cur_token()->{type} . "\n";
 		$self->{parser}->error("Did not find expected token after 'include'");
 	}
@@ -1329,7 +1334,7 @@ sub parse {
 
 sub output {
 	my ($self) = @_;
-	return $self->indent() . 'include ' . $self->{class}->output() . $self->nl();
+	return $self->indent() . $self->{funcname}->output() . ' ' . $self->{class}->output() . $self->nl();
 }
 
 package PuppetParser::VarAssignment;
