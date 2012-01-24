@@ -1295,6 +1295,9 @@ sub patterns {
 sub parse {
 	my ($self) = @_;
 	$self->{variant} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+	if($self->{parser}->scan_for_token(['RETURN'], [])) {
+		$self->{parser}->next_token();
+	}
 	if(!$self->{parser}->scan_for_token(['LBRACE'], [])) {
 		$self->{condition} = $self->{parser}->scan_for_value($self, ['LBRACE']);
 	}
