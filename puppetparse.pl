@@ -23,8 +23,8 @@ my @keywords = (
 	"and",
 	"or",
 	"undef",
-	"false",
-	"true",
+#	"false",
+#	"true",
 	"in",
 	"include",
 );
@@ -96,6 +96,7 @@ my @object_classes = (
 	'PuppetParser::IfStatement',
 	'PuppetParser::VarAssignment',
 	'PuppetParser::CaseStatement',
+	'PuppetParser::CaseCondition',
 	'PuppetParser::Define',
 	'PuppetParser::Comment',
 	'PuppetParser::ResourceRef',
@@ -140,6 +141,8 @@ sub output_json {
 sub output {
 	my ($self, $output) = @_;
 	my $buffer = $self->{tree}->output_children();
+	$buffer =~ s/^\n+//s;
+	$buffer =~ s/\n+$/\n/s;
 	if(defined $output && $output ne '') {
 		open FOO, "> $output" or die "Could not open output file $output: $!";
 		print FOO $buffer;
@@ -431,7 +434,7 @@ sub scan_for_value {
 	if(PuppetParser::ResourceRef->valid($self)) {
 		return PuppetParser::ResourceRef->new(parent => $parent, parser => $self);
 	}
-	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT'])) {
+	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT', 'DEFAULT', 'REGEX', 'NUMBER'])) {
 		# This looks like a simple value
 		my $value = PuppetParser::Simple->new(parser => $self);
 		if(!$self->scan_for_token($term, [])) {
@@ -590,10 +593,7 @@ sub output_children {
 	for(@{$self->{contents}}) {
 		my $child_output .= $_->output();
 		if($_->{outer_spacing}) {
-			if($buf !~ /^\n*$/) {
-				$child_output = "\n" . $child_output;
-			}
-			$child_output .= "\n";
+			$child_output = "\n" . $child_output . "\n";
 		}
 		$buf .= $child_output;
 	}
@@ -852,11 +852,59 @@ sub patterns {
 	return \@patterns;
 }
 
+sub apply_defaults {
+	my ($self) = @_;
+	$self->SUPER::apply_defaults({ inner_spacing => 0, outer_spacing => 1 });
+}
+
 sub parse {
 	my ($self) = @_;
 	$self->{parser}->next_token();
-	$self->{casevar} = $self->{parser}->scan_for_value(['LBRACE']);
+	$self->{casevar} = $self->{parser}->scan_for_value($self, ['LBRACE']);
 	$self->{parser}->next_token();
+	$self->parse_children();
+}
+
+sub output {
+	my ($self) = @_;
+	my $buf = $self->indent() . 'case ' . $self->{casevar}->output() . ' {' . $self->nl();
+	$buf .= $self->output_children();
+	$buf .= $self->indent() . '}' . $self->nl();
+	return $buf;
+}
+
+package PuppetParser::CaseCondition;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['REGEX', 'COLON', 'LBRACE'],
+	['NAME', 'COLON', 'LBRACE'],
+	['SQUOTES', 'COLON', 'LBRACE'],
+	['DQUOTES', 'COLON', 'LBRACE'],
+	['DEFAULT', 'COLON', 'LBRACE'],
+);
+
+sub patterns {
+	return \@patterns;
+}
+
+sub parse {
+	my ($self) = @_;
+	$self->{condition} = $self->{parser}->scan_for_value($self, ['COLON']);
+	$self->{parser}->next_token();
+	if(!$self->{parser}->scan_for_token(['LBRACE'], [])) {
+		$self->{parser}->error("Did not find expecte token '{'");
+	}
+	$self->{parser}->next_token();
+	$self->parse_children();
+}
+
+sub output {
+	my ($self) = @_;
+	my $buf = $self->indent() . $self->{condition}->output() . ': {' . $self->nl();
+	$buf .= $self->output_children();
+	$buf .= $self->indent() . '}' . $self->nl();
+	return $buf;
 }
 
 package PuppetParser::KeyValuePair;
@@ -1006,6 +1054,11 @@ our @patterns = (
 
 sub patterns {
 	return \@patterns;
+}
+
+sub apply_defaults {
+	my ($self) = @_;
+	$self->SUPER::apply_defaults({ outer_spacing => 1 });
 }
 
 sub valid {
@@ -1179,13 +1232,24 @@ sub parse {
 			push @{$self->{items}}, PuppetParser::Comment->new(parent => $self, parser => $self->{parser});
 			next TOKEN;
 		}
-		if($self->{parser}->scan_for_token(['COMMA'], [])) {
+		if($self->{parser}->scan_for_token(['COMMA', 'SEMIC'], [])) {
 			$self->{parser}->next_token();
 			next TOKEN;
 		}
 		for my $pattern (@res_title_patterns) {
 			if($self->{parser}->match_token_sequence($pattern)) {
 				# It's a resource title
+				if(defined $self->{restitle}) {
+					# It's second resource title, oh noes!
+					$self->{parser}->inject_tokens([
+						{ type => 'RBRACE', text => '}', line => -1 },
+						{ type => 'RETURN', text => "\n", line => -1 },
+						{ type => 'NAME', text => $self->{restype}->{text}, line => -1 },
+						{ type => 'LBRACE', text => '{', line => -1 },
+					]);
+					$self->{parser}->next_token();
+					last TOKEN;
+				}
 				$self->{restitle} = $self->{parser}->scan_for_value($self, ['COLON']);
 				$self->{parser}->next_token();
 				next TOKEN;
