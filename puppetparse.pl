@@ -1225,10 +1225,10 @@ sub valid {
 	return $class->SUPER::valid($parser, $parent);
 }
 
-sub apply_defaults {
-	my ($self) = @_;
-	$self->SUPER::apply_defaults({ outer_spacing => 1 });
-}
+#sub apply_defaults {
+#	my ($self) = @_;
+#	$self->SUPER::apply_defaults({ outer_spacing => 1 });
+#}
 
 sub parse {
 	my ($self) = @_;
@@ -1358,8 +1358,8 @@ sub parse {
 		$self->{parser}->error("Did not find expected token '=' after '" . $self->{varname}->{text} . "'");
 	}
 	$self->{parser}->next_token();
-	$self->{value} = $self->{parser}->scan_for_value($self, ['RETURN']);
-	$self->{parser}->next_token();
+	$self->{value} = $self->{parser}->scan_for_value($self, ['RETURN', 'RBRACE']);
+	#$self->{parser}->next_token();
 }
 
 sub output {
