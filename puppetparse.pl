@@ -156,6 +156,7 @@ sub output {
 sub error {
 	my ($self, $msg) = @_;
 	print STDERR "ERROR: ${msg} on line " . $self->cur_token()->{line} . " in file " . $self->{file} . "\n";
+	print Dumper($self->cur_token());
 	$self->show_call_stack();
 	exit 1;
 }
@@ -411,15 +412,15 @@ sub scan_for_object {
 	my $orig_token = $self->get_token_idx();
 	my $cur_token = undef;
 	PACKAGE: for my $package (@object_classes) {
-		PATTERN: for my $pattern (@{$package->patterns()}) {
-			if($self->match_token_sequence($pattern, [])) {
-				if($package->valid($self)) {
+#		PATTERN: for my $pattern (@{$package->patterns()}) {
+#			if($self->match_token_sequence($pattern, [])) {
+				if($package->valid($self, $parent)) {
 					return $package->new(parent => $parent, parser => $self);
 				} else {
 					next PACKAGE;
 				}
-			}
-		}
+#			}
+#		}
 	}
 	$self->set_token_idx($orig_token);
 	# We don't know how to handle this
@@ -432,10 +433,10 @@ sub scan_for_value {
 		$term = ['RETURN', 'COMMENT'];
 	}
 	my $orig_token = $self->get_token_idx();
-	if(PuppetParser::ResourceRef->valid($self)) {
+	if(PuppetParser::ResourceRef->valid($self, $parent)) {
 		return PuppetParser::ResourceRef->new(parent => $parent, parser => $self);
 	}
-	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT', 'DEFAULT', 'REGEX', 'NUMBER'])) {
+	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT', 'DEFAULT', 'REGEX', 'NUMBER', 'CLASSREF'])) {
 		# This looks like a simple value
 		my $value = PuppetParser::Simple->new(parser => $self);
 		if(!$self->scan_for_token($term, [])) {
@@ -577,6 +578,21 @@ sub nl {
 }
 
 sub valid {
+	my ($class, $parser, $parent) = @_;
+#	print "${class}::valid()\n";
+	my $patterns = $class->patterns();
+	if(scalar(@{$patterns}) > 0) {
+		for my $pattern (@{$patterns}) {
+#			print Dumper($pattern);
+			if($parser->match_token_sequence($pattern, [])) {
+#				print "Token sequence matched\n";
+				return 1;
+			}
+		}
+#		print "${class}::valid(): no matching token sequence\n";
+		return 0;
+	}
+#	print "${class}::valid(): returning default valid\n";
 	return 1;
 }
 
@@ -784,7 +800,7 @@ sub parse {
 			push @{$self->{items}}, PuppetParser::Comment->new(parent => $self, parser => $self->{parser});
 			next;
 		}
-		if(PuppetParser::KeyValuePair->valid($self->{parser})) {
+		if(PuppetParser::KeyValuePair->valid($self->{parser}, $self)) {
 			push @{$self->{items}}, PuppetParser::KeyValuePair->new(parent => $self, parser => $self->{parser});
 			next;
 		}
@@ -828,7 +844,7 @@ sub parse {
 		if($self->{parser}->scan_for_token($self->{term}, [])) {
 			last;
 		}
-		if(PuppetParser::FunctionCall->valid($self->{parser})) {
+		if(PuppetParser::FunctionCall->valid($self->{parser}, $self)) {
 			push @{$self->{parts}}, PuppetParser::FunctionCall->new(parent => $self, parser => $self->{parser}, embed => 1);
 			next;
 		}
@@ -918,6 +934,7 @@ our @patterns = (
 	['SQUOTES', 'COLON', 'LBRACE'],
 	['DQUOTES', 'COLON', 'LBRACE'],
 	['DEFAULT', 'COLON', 'LBRACE'],
+	['CLASSREF', 'COLON', 'LBRACE'],
 );
 
 sub patterns {
@@ -1252,9 +1269,27 @@ sub patterns {
 	return \@patterns;
 }
 
+sub valid {
+	my ($class, $parser, $parent) = @_;
+	my $orig_token = $parser->get_token_idx();
+	if(PuppetParser::ResourceRef->valid($parser, $parent)) {
+		my $foo = PuppetParser::ResourceRef->new(parent => $parent, parser => $parser);
+		if($parser->scan_for_token(['LBRACE'], [])) {
+			$parser->set_token_idx($orig_token);
+			return 1;
+		}
+	}
+	$parser->set_token_idx($orig_token);
+	return $class->SUPER::valid($parser, $parent);
+}
+
 sub parse {
 	my ($self) = @_;
-	$self->{restype} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+	if(PuppetParser::ResourceRef->valid($self->{parser}, $self)) {
+		$self->{restype} = PuppetParser::ResourceRef->new(parent => $self, parser => $self->{parser});
+	} else {
+		$self->{restype} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+	}
 	if(!$self->{parser}->scan_for_token(['LBRACE'])) {
 		$self->{parser}->error("Did not find expected token '{'");
 	}
@@ -1296,7 +1331,7 @@ sub parse {
 				next TOKEN;
 			}
 		}
-		if(PuppetParser::KeyValuePair->valid($self->{parser})) {
+		if(PuppetParser::KeyValuePair->valid($self->{parser}, $self)) {
 			push @{$self->{items}}, PuppetParser::KeyValuePair->new(parent => $self, parser => $self->{parser});
 			next TOKEN;
 		}
@@ -1315,7 +1350,10 @@ sub output {
 			}
 		}
 	}
-	my $buf = $self->indent() . $self->{restype}->output() . ' { ' . $self->{restitle}->output() . ':';
+	my $buf = $self->indent() . $self->{restype}->output() . ' { ';
+	if(defined $self->{restitle}) {
+		$buf .= $self->{restitle}->output() . ':';
+	}
 	if(scalar(@{$self->{items}}) > 0) {
 		$buf .= $self->nl();
 	}
