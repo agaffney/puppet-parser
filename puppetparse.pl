@@ -1280,12 +1280,31 @@ sub valid {
 			return 1;
 		}
 	}
+	if($parser->scan_for_token(['AT'], [])) {
+		# Virtual resource
+		$parser->next_token();
+		if($parser->scan_for_token(['AT'], [])) {
+			# Exported resource
+			$parser->next_token();
+		}
+	} else {
+		$parser->set_token_idx($orig_token);
+	}
+	my $valid = $class->SUPER::valid($parser, $parent);
 	$parser->set_token_idx($orig_token);
-	return $class->SUPER::valid($parser, $parent);
+	return $valid;
 }
 
 sub parse {
 	my ($self) = @_;
+	if($self->{parser}->scan_for_token(['AT'], [])) {
+		$self->{special} = '@';
+		$self->{parser}->next_token();
+		if($self->{parser}->scan_for_token(['AT'], [])) {
+			$self->{special} = '@@';
+			$self->{parser}->next_token();
+		}
+	}
 	if(PuppetParser::ResourceRef->valid($self->{parser}, $self)) {
 		$self->{restype} = PuppetParser::ResourceRef->new(parent => $self, parser => $self->{parser});
 	} else {
@@ -1351,7 +1370,7 @@ sub output {
 			}
 		}
 	}
-	my $buf = $self->indent() . $self->{restype}->output() . ' { ';
+	my $buf = $self->indent() . (defined $self->{special} ? $self->{special} : '') . $self->{restype}->output() . ' { ';
 	if(defined $self->{restitle}) {
 		$buf .= $self->{restitle}->output() . ':';
 	}
