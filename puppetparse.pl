@@ -101,6 +101,7 @@ my @object_classes = (
 	'PuppetParser::Define',
 	'PuppetParser::Comment',
 	'PuppetParser::MultilineComment',
+	'PuppetParser::DependencyChain',
 	'PuppetParser::ResourceRef',
 	'PuppetParser::Newline',
 	# Leave this one at the bottom, so its patterns match last
@@ -583,20 +584,15 @@ sub nl {
 
 sub valid {
 	my ($class, $parser, $parent) = @_;
-#	print "${class}::valid()\n";
 	my $patterns = $class->patterns();
 	if(scalar(@{$patterns}) > 0) {
 		for my $pattern (@{$patterns}) {
-#			print Dumper($pattern);
 			if($parser->match_token_sequence($pattern, [])) {
-#				print "Token sequence matched\n";
 				return 1;
 			}
 		}
-#		print "${class}::valid(): no matching token sequence\n";
 		return 0;
 	}
-#	print "${class}::valid(): returning default valid\n";
 	return 1;
 }
 
@@ -623,8 +619,7 @@ sub output_children {
 	}
 	# Formatting fixups
 	$buf =~ s/\n{3,}/\n\n/gs;
-	$buf =~ s/}\n\n\s*else /} else /gs;
-	$buf =~ s/}\n\n\s*elsif /} else /gs;
+	$buf =~ s/}\n\n\s*(else|elsif) /} else /gs;
 	return $buf;
 }
 
@@ -1339,6 +1334,57 @@ sub parse {
 sub output {
 	my ($self) = @_;
 	return $self->indent() . $self->{varname}->output() . ' = ' . $self->{value}->output() . $self->nl();
+}
+
+package PuppetParser::DependencyChain;
+
+our @ISA = 'PuppetParser::Object';
+
+sub valid {
+	my ($class, $parser, $parent) = @_;
+	my $orig_token = $parser->get_token_idx();
+	if(PuppetParser::ResourceRef->valid($parser, $parent)) {
+		my $foo = PuppetParser::ResourceRef->new(parent => $parent, parser => $parser);
+		if($parser->scan_for_token(['IN_EDGE', 'OUT_EDGE'], [])) {
+			$parser->set_token_idx($orig_token);
+			return 1;
+		}
+	}
+	$parser->set_token_idx($orig_token);
+	return 0;
+}
+
+sub apply_defaults {
+	my ($self) = @_;
+	$self->SUPER::apply_defaults({ outer_spacing => 1 });
+}
+
+sub parse {
+	my ($self) = @_;
+	$self->{items} = [];
+	while(1) {
+		if($self->{parser}->scan_for_token(['RETURN'], [])) {
+			$self->{parser}->next_token();
+			last;
+		}
+		if(PuppetParser::ResourceRef->valid($self->{parser}, $self)) {
+			push @{$self->{items}}, PuppetParser::ResourceRef->new(parent => $self, parser => $self->{parser});
+			next;
+		}
+		if($self->{parser}->scan_for_token(['IN_EDGE', 'OUT_EDGE'], [])) {
+			push @{$self->{items}}, PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+			next;
+		}
+		$self->{parser}->error("Unexpected token");
+	}
+}
+
+sub output {
+	my ($self) = @_;
+	my $buf = $self->indent();
+	$buf .= join(' ', map { $_->output() } @{$self->{items}});
+	$buf .= $self->nl();
+	return $buf;
 }
 
 package PuppetParser::Resource;
