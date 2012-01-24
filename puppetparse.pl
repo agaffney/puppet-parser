@@ -866,6 +866,10 @@ sub parse {
 		if($self->{parser}->scan_for_token($self->{term}, [])) {
 			last;
 		}
+		if($self->{parser}->scan_for_token(['RETURN'], [])) {
+			$self->{parser}->next_token();
+			next;
+		}
 		if(PuppetParser::FunctionCall->valid($self->{parser}, $self)) {
 			push @{$self->{parts}}, PuppetParser::FunctionCall->new(parent => $self, parser => $self->{parser}, embed => 1);
 			next;
@@ -1018,16 +1022,26 @@ package PuppetParser::CaseCondition;
 
 our @ISA = 'PuppetParser::Object';
 our @patterns = (
-	['REGEX', 'COLON', 'LBRACE'],
-	['NAME', 'COLON', 'LBRACE'],
-	['SQUOTES', 'COLON', 'LBRACE'],
-	['DQUOTES', 'COLON', 'LBRACE'],
-	['DEFAULT', 'COLON', 'LBRACE'],
-	['CLASSREF', 'COLON', 'LBRACE'],
+	['REGEX'], #, 'COLON', 'LBRACE'],
+	['NAME'], #, 'COLON', 'LBRACE'],
+	['SQUOTES'], #, 'COLON', 'LBRACE'],
+	['DQUOTES'], #, 'COLON', 'LBRACE'],
+	['DEFAULT'], #, 'COLON', 'LBRACE'],
+	['CLASSREF'], #, 'COLON', 'LBRACE'],
 );
 
 sub patterns {
 	return \@patterns;
+}
+
+sub valid {
+	my ($class, $parser, $parent) = @_;
+	my $orig_token = $parser->get_token_idx();
+	if(!$parent->isa('PuppetParser::CaseStatement')) {
+		# If the parent isn't a CaseStatement, this shouldn't be a CaseCondition
+		return 0;
+	}
+	return $class->SUPER::valid($parser, $parent);
 }
 
 sub parse {
