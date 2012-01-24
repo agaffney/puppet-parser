@@ -441,7 +441,7 @@ sub scan_for_value {
 	if(PuppetParser::Selector->valid($self, $parent)) {
 		return PuppetParser::Selector->new(parent => $parent, parser => $self, level => $parent->{level});
 	}
-	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT', 'DEFAULT', 'REGEX', 'NUMBER', 'CLASSREF'])) {
+	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT', 'DEFAULT', 'REGEX', 'NUMBER', 'CLASSREF', 'LPAREN'])) {
 		# This looks like a simple value
 		my $value = PuppetParser::Simple->new(parser => $self);
 		if(!$self->scan_for_token($term, [])) {
