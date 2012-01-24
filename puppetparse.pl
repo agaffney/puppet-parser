@@ -408,9 +408,9 @@ sub scan_for_token {
 sub scan_for_object {
 	my ($self, $parent) = @_;
 	my $token = $self->cur_token();
-	print "Line: ", $token->{line}, ", ";
-	print "Type: ", $token->{type}, ", ";
-	print "Content:->", $token->{text}, "<-\n";
+#	print "Line: ", $token->{line}, ", ";
+#	print "Type: ", $token->{type}, ", ";
+#	print "Content:->", $token->{text}, "<-\n";
 	my $orig_token = $self->get_token_idx();
 	my $cur_token = undef;
 	PACKAGE: for my $package (@object_classes) {
@@ -1109,7 +1109,7 @@ use Data::Dumper;
 
 our @ISA = 'PuppetParser::Object';
 our @patterns = (
-	['CLASS'],
+	['CLASS', 'NAME'],
 );
 
 sub apply_defaults {
@@ -1420,6 +1420,8 @@ package PuppetParser::Resource;
 our @ISA = 'PuppetParser::Object';
 our @patterns = (
 	['NAME', 'LBRACE'],
+	['CLASS', 'LBRACE'],
+	['CLASSREF', 'LBRACE'],
 );
 our @res_title_patterns = (
 	['NAME', 'COLON'],
