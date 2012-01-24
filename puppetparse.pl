@@ -969,7 +969,7 @@ sub valid {
 	my $orig_token = $parser->get_token_idx();
 	if($parser->scan_for_token(['NAME', 'SQUOTES', 'DQUOTES'], [])) {
 		$parser->next_token();
-		if($parser->scan_for_token(['FARROW'], [])) {
+		if($parser->scan_for_token(['FARROW', 'PARROW'], [])) {
 			$parser->set_token_idx($orig_token);
 			return 1;
 		}
