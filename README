@@ -1,0 +1,5 @@
+This is a script I wrote to help me clean up a lot of old puppet manifests that
+were written using a variety of styles by a variety of authors.
+
+It is written in perl and only has a few dependencies. Currently, you'll need
+the Parse::Lex and JSON modules.
