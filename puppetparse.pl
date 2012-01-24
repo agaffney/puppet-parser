@@ -778,6 +778,7 @@ sub parse {
 	}
 	$self->{parser}->next_token();
 	while(1) {
+		print "Token: type=" . $self->{parser}->cur_token()->{type} . "\n";
 		if($self->{parser}->scan_for_token([$self->{end}], [])) {
 			$self->{parser}->next_token();
 			last;
@@ -788,6 +789,7 @@ sub parse {
 		}
 		if($self->{parser}->scan_for_token(['COMMENT'], [])) {
 			push @{$self->{items}}, PuppetParser::Comment->new(parent => $self, parser => $self->{parser});
+			next;
 		}
 		push @{$self->{items}}, $self->{parser}->scan_for_value($self, ['COMMA', $self->{end}]);
 	}
@@ -795,9 +797,15 @@ sub parse {
 
 sub output {
 	my ($self) = @_;
-	my $buf = '[';
-	$buf .= join(', ', map { $_->output() } @{$self->{items}} );
-	$buf .= ']';
+	my $buf = '[' . $self->nl();
+	for(@{$self->{items}}) {
+		if($_->isa('PuppetParser::Comment')) {
+			$buf .= $_->output();
+		} else {
+			$buf .= $self->indent($self->{level} + 1) . $_->output() . ',' . $self->nl();
+		}
+	}
+	$buf .= $self->indent() . ']';
 	return $buf;
 }
 
@@ -1184,6 +1192,9 @@ sub parse {
 			}
 			push @{$self->{args}}, $self->{parser}->scan_for_value($self, ['COMMA', 'RPAREN']);
 		}
+	}
+	if($self->{parser}->scan_for_token(['RETURN'], [])) {
+		$self->{parser}->next_token();
 	}
 	if(!$self->{parser}->scan_for_token(['LBRACE'], [])) {
 		$self->{parser}->error("Unexpected token");
