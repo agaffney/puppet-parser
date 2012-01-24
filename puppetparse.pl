@@ -65,6 +65,7 @@ my @tokens = (
 	"PLUS" => '\+',
 	"MINUS" => '-',
 	"REGEX", '\/[^/\n]*\/',
+	new Parse::Token::Delimited(Name => 'MLCOMMENT', Start => '/[*]', End => '[*]/' ),
 	"DIV" => '/',
 	"TIMES" => '\*',
 	"LSHIFT" => '<<',
@@ -74,7 +75,6 @@ my @tokens = (
 	"NUMBER" => '\b(?:0[xX][0-9A-Fa-f]+|0?\d+(?:\.\d+)?(?:[eE]-?\d+)?)\b',
 	"NAME" => '((::)?[a-z0-9][-\w]*)(::[a-z0-9][-\w]*)*',
 	"COMMENT" => '#.*',
-	new Parse::Token::Delimited(Name => 'MLCOMMENT', Start => '/[*]', End => '[*]/' ),
 #	"MLCOMMENT", qw(/\*(.*?)\*/), #m
 	"RETURN", '\n',
 	"COLON" => ':',
@@ -100,6 +100,7 @@ my @object_classes = (
 	'PuppetParser::Node',
 	'PuppetParser::Define',
 	'PuppetParser::Comment',
+	'PuppetParser::MultilineComment',
 	'PuppetParser::ResourceRef',
 	'PuppetParser::Newline',
 	# Leave this one at the bottom, so its patterns match last
@@ -697,6 +698,29 @@ sub parse {
 sub output {
 	my ($self) = @_;
 	return $self->indent() . '# ' . $self->{comment} . $self->nl();
+}
+
+package PuppetParser::MultilineComment;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['MLCOMMENT'],
+);
+
+sub patterns {
+	return \@patterns;
+}
+
+sub parse {
+	my ($self) = @_;
+	my $token = $self->{parser}->cur_token();
+	$self->{comment} = $token->{text};
+	$self->{parser}->next_token();
+}
+
+sub output {
+	my ($self) = @_;
+	return $self->indent() . $self->{comment} . $self->nl();
 }
 
 package PuppetParser::ResourceRef;
