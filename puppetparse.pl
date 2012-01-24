@@ -441,7 +441,7 @@ sub scan_for_value {
 	if(PuppetParser::Selector->valid($self, $parent)) {
 		return PuppetParser::Selector->new(parent => $parent, parser => $self, level => $parent->{level});
 	}
-	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT', 'DEFAULT', 'REGEX', 'NUMBER', 'CLASSREF', 'LPAREN', 'REGEX'])) {
+	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT', 'DEFAULT', 'REGEX', 'NUMBER', 'CLASSREF', 'LPAREN', 'REGEX', 'UNDEF'])) {
 		# This looks like a simple value
 		my $value = PuppetParser::Simple->new(parser => $self);
 		if(!$self->scan_for_token($term, [])) {
@@ -1202,28 +1202,37 @@ sub patterns {
 	return \@patterns;
 }
 
+sub valid {
+	my ($class, $parser, $parent) = @_;
+	my $token = $parser->cur_token();
+	if($token->{text} =~ /^(include|import|realize)$/) {
+		return 1;
+	}
+	return $class->SUPER::valid($parser, $parent);
+}
+
 sub apply_defaults {
 	my ($self) = @_;
 	$self->SUPER::apply_defaults({ outer_spacing => 1 });
-}
-
-sub valid {
-	my ($class, $parser) = @_;
-	if($parser->match_token_sequence(['NAME', 'LPAREN'], [])) {
-		return 1;
-	}
-	return 0;
 }
 
 sub parse {
 	my ($self) = @_;
 	$self->{funcname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
 	if(!$self->{parser}->scan_for_token(['LPAREN'])) {
-		$self->{parser}->error("Did not find expected token '('");
+#		$self->{parser}->error("Did not find expected token '('");
+		# This is a function call without parens
+		$self->{bare} = 1;
+	} else {
+		$self->{bare} = 0;
+		$self->{parser}->next_token();
 	}
-	$self->{parser}->next_token();
 	$self->{args} = [];
 	while(1) {
+		if($self->{bare} && $self->{parser}->scan_for_token(['RETURN'], [])) {
+			$self->{parser}->next_token();
+			last;
+		}
 		if($self->{parser}->scan_for_token(['RPAREN'], [])) {
 			$self->{parser}->next_token();
 			last;
