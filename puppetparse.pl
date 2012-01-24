@@ -48,7 +48,6 @@ my @tokens = (
 	"NOT" => '!',
 	"COMMA" => ',',
 	"DOT" => '\.',
-	"COLON" => ':',
 	"AT" => '@',
 	"IN_EDGE" => '->',
 	"OUT_EDGE" => '<-',
@@ -78,6 +77,7 @@ my @tokens = (
 	new Parse::Token::Delimited(Name => 'MLCOMMENT', Start => '/[*]', End => '[*]/' ),
 #	"MLCOMMENT", qw(/\*(.*?)\*/), #m
 	"RETURN", '\n',
+	"COLON" => ':',
 	"DOLLAR_VAR", '\$(::)?([-\w]+::)*[-\w]+',
 	"VARIABLE", '(::)?([-\w]+::)*[-\w]+',
 	new Parse::Token::Quoted(Name => 'SQUOTES', Handler => 'string', Quote => "'"),
@@ -97,6 +97,7 @@ my @object_classes = (
 	'PuppetParser::VarAssignment',
 	'PuppetParser::CaseStatement',
 	'PuppetParser::CaseCondition',
+	'PuppetParser::Node',
 	'PuppetParser::Define',
 	'PuppetParser::Comment',
 	'PuppetParser::ResourceRef',
@@ -404,9 +405,9 @@ sub scan_for_token {
 sub scan_for_object {
 	my ($self, $parent) = @_;
 	my $token = $self->cur_token();
-	print "Line: ", $token->{line}, ", ";
-	print "Type: ", $token->{type}, ", ";
-	print "Content:->", $token->{text}, "<-\n";
+#	print "Line: ", $token->{line}, ", ";
+#	print "Type: ", $token->{type}, ", ";
+#	print "Content:->", $token->{text}, "<-\n";
 	my $orig_token = $self->get_token_idx();
 	my $cur_token = undef;
 	PACKAGE: for my $package (@object_classes) {
@@ -873,6 +874,41 @@ sub output {
 	return $buf;
 }
 
+package PuppetParser::Node;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['NODE'],
+);
+
+sub patterns {
+	return \@patterns;
+}
+
+sub apply_defaults {
+	my ($self) = @_;
+	$self->SUPER::apply_defaults({ outer_spacing => 1 });
+}
+
+sub parse {
+	my ($self) = @_;
+	$self->{parser}->next_token();
+	if(!$self->{parser}->scan_for_token(['SQUOTES', 'DQUOTES', 'NAME', 'REGEX', 'DEFAULT'], [])) {
+		$self->{parser}->error("Unexpected token after 'node'");
+	}
+	$self->{nodename} = $self->{parser}->scan_for_value($self, ['LBRACE']);
+	$self->{parser}->next_token();
+	$self->parse_children();
+}
+
+sub output {
+	my ($self) = @_;
+	my $buf = $self->indent() . 'node ' . $self->{nodename}->output() . ' {' . $self->nl();
+	$buf .= $self->output_children();
+	$buf .= $self->indent() . '}' . $self->nl();
+	return $buf;
+}
+
 package PuppetParser::CaseCondition;
 
 our @ISA = 'PuppetParser::Object';
@@ -968,6 +1004,10 @@ sub parse {
 		$self->{parser}->error("Did not find expected token type after 'class'");
 	}
 	$self->{classname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+	if($self->{parser}->scan_for_token(['INHERITS'], [])) {
+		$self->{parser}->next_token();
+		$self->{inherits} = $self->{parser}->scan_for_value($self, ['LBRACE']);
+	}
 	if(!$self->{parser}->scan_for_token(['LBRACE'])) {
 		$self->{parser}->error("Did not find expected token '{'");
 	}
@@ -1152,6 +1192,7 @@ sub parse {
 	my ($self) = @_;
 	$self->{parser}->next_token();
 	if(!$self->{parser}->scan_for_token(['NAME', 'DOLLAR_VAR'])) {
+		print "Type=" . $self->{parser}->cur_token()->{type} . "\n";
 		$self->{parser}->error("Did not find expected token after 'include'");
 	}
 	$self->{class} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
