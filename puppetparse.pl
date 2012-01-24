@@ -1056,7 +1056,7 @@ our @ISA = 'PuppetParser::Object';
 sub valid {
 	my ($class, $parser) = @_;
 	my $orig_token = $parser->get_token_idx();
-	if($parser->scan_for_token(['NAME', 'SQUOTES', 'DQUOTES', 'CLASSREF', 'DEFAULT', 'REGEX'], [])) {
+	if($parser->scan_for_token(['NAME', 'SQUOTES', 'DQUOTES', 'CLASSREF', 'DEFAULT', 'REGEX', 'NUMBER'], [])) {
 		$parser->next_token();
 		if($parser->scan_for_token(['FARROW', 'PARROW'], [])) {
 			$parser->set_token_idx($orig_token);
