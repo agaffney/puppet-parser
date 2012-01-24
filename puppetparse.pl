@@ -436,6 +436,9 @@ sub scan_for_value {
 	if(PuppetParser::ResourceRef->valid($self, $parent)) {
 		return PuppetParser::ResourceRef->new(parent => $parent, parser => $self);
 	}
+	if(PuppetParser::Selector->valid($self, $parent)) {
+		return PuppetParser::Selector->new(parent => $parent, parser => $self, level => $parent->{level});
+	}
 	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT', 'DEFAULT', 'REGEX', 'NUMBER', 'CLASSREF'])) {
 		# This looks like a simple value
 		my $value = PuppetParser::Simple->new(parser => $self);
@@ -687,7 +690,7 @@ sub parse {
 	my ($self) = @_;
 	my $token = $self->{parser}->cur_token();
 	$self->{comment} = $token->{text};
-	$self->{comment} =~ s/^[# ]+//;
+	$self->{comment} =~ s/^[#\s]+//;
 	$self->{parser}->next_token();
 }
 
@@ -858,6 +861,73 @@ sub output {
 	return $buf;
 }
 
+package PuppetParser::Selector;
+
+our @ISA = 'PuppetParser::Object';
+our @patterns = (
+	['DOLLAR_VAR', 'QMARK', 'LBRACE'],
+);
+
+sub patterns {
+	return \@patterns;
+}
+
+sub parse {
+	my ($self) = @_;
+	$self->{varname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+	$self->{parser}->next_token();
+	if(!$self->{parser}->scan_for_token(['LBRACE'], [])) {
+		$self->{parser}->error("Did not find expected token '{'");
+	}
+	$self->{parser}->next_token();
+	$self->{items} = [];
+	while(1) {
+		if($self->{parser}->scan_for_token(['COMMA', 'RETURN'], [])) {
+			$self->{parser}->next_token();
+			next;
+		}
+		if($self->{parser}->scan_for_token(['RBRACE'], [])) {
+			$self->{parser}->next_token();
+			last;
+		}
+		if($self->{parser}->scan_for_token(['COMMENT'], [])) {
+			push @{$self->{items}}, PuppetParser::Comment->new(parent => $self, parser => $self->{parser});
+			next;
+		}
+		if(PuppetParser::KeyValuePair->valid($self->{parser}, $self)) {
+			push @{$self->{items}}, PuppetParser::KeyValuePair->new(parent => $self, parser => $self->{parser});
+			next;
+		}
+		$self->{parser}->error("Unexpected token '" . $self->{parser}->cur_token()->{text} . "'");
+	}
+}
+
+sub output {
+	my ($self) = @_;
+	my $max_key_len = 0;
+	for(@{$self->{items}}) {
+		if($_->can('key_len')) {
+			my $key_len = $_->key_len();
+			if($key_len > $max_key_len) {
+				$max_key_len = $key_len;
+			}
+		}
+	}
+	my $buf = $self->{varname}->output() . ' ? {';
+	if(scalar(@{$self->{items}}) > 0) {
+		$buf .= $self->nl();
+	}
+	for(@{$self->{items}}) {
+		if($_->can('set_max_key_len')) {
+			$_->set_max_key_len($max_key_len);
+		}
+		$buf .= $_->output();
+	}
+	$buf .= (scalar(@{$self->{items}}) > 0 ? $self->indent() : ' ') . '}';
+	return $buf;
+}
+
+
 package PuppetParser::CaseStatement;
 
 our @ISA = 'PuppetParser::Object';
@@ -967,7 +1037,7 @@ our @ISA = 'PuppetParser::Object';
 sub valid {
 	my ($class, $parser) = @_;
 	my $orig_token = $parser->get_token_idx();
-	if($parser->scan_for_token(['NAME', 'SQUOTES', 'DQUOTES'], [])) {
+	if($parser->scan_for_token(['NAME', 'SQUOTES', 'DQUOTES', 'CLASSREF', 'DEFAULT'], [])) {
 		$parser->next_token();
 		if($parser->scan_for_token(['FARROW', 'PARROW'], [])) {
 			$parser->set_token_idx($orig_token);
