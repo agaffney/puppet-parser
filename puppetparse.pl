@@ -1254,6 +1254,7 @@ our @patterns = (
 	['NAME', 'LBRACE'],
 );
 our @res_title_patterns = (
+	['NAME', 'COLON'],
 	['DOLLAR_VAR', 'COLON'],
 	['SQUOTES', 'COLON'],
 	['DQUOTES', 'COLON'],
