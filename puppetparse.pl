@@ -435,11 +435,11 @@ sub scan_for_value {
 		$term = ['RETURN', 'COMMENT'];
 	}
 	my $orig_token = $self->get_token_idx();
-	if(PuppetParser::ResourceRef->valid($self, $parent)) {
-		return PuppetParser::ResourceRef->new(parent => $parent, parser => $self);
-	}
 	if(PuppetParser::Selector->valid($self, $parent)) {
 		return PuppetParser::Selector->new(parent => $parent, parser => $self, level => $parent->{level});
+	}
+	if(PuppetParser::ResourceRef->valid($self, $parent)) {
+		return PuppetParser::ResourceRef->new(parent => $parent, parser => $self);
 	}
 	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT', 'DEFAULT', 'REGEX', 'NUMBER', 'CLASSREF', 'LPAREN', 'REGEX', 'UNDEF'])) {
 		# This looks like a simple value
@@ -723,6 +723,7 @@ package PuppetParser::ResourceRef;
 our @ISA = 'PuppetParser::Object';
 our @patterns = (
 	['CLASSREF'],
+	['DOLLAR_VAR', 'LBRACK'],
 );
 
 sub patterns {
@@ -732,11 +733,11 @@ sub patterns {
 sub valid {
 	my ($class, $parser) = @_;
 	my $orig_token = $parser->get_token_idx();
-	if($parser->scan_for_token(['CLASSREF'], [])) {
+	if($parser->scan_for_token(['CLASSREF', 'DOLLAR_VAR'], [])) {
 		$parser->next_token();
 		if($parser->scan_for_token(['LBRACK'], [])) {
 			$parser->next_token();
-			if($parser->scan_for_token(['NAME', 'SQUOTES', 'DQUOTES', 'DOLLAR_VAR'], [])) {
+			if($parser->scan_for_token(['NAME', 'SQUOTES', 'DQUOTES', 'DOLLAR_VAR', 'NUMBER'], [])) {
 				$parser->set_token_idx($orig_token);
 				return 1;
 			}
@@ -778,7 +779,6 @@ sub parse {
 	}
 	$self->{parser}->next_token();
 	while(1) {
-		print "Token: type=" . $self->{parser}->cur_token()->{type} . "\n";
 		if($self->{parser}->scan_for_token([$self->{end}], [])) {
 			$self->{parser}->next_token();
 			last;
@@ -903,9 +903,30 @@ sub patterns {
 	return \@patterns;
 }
 
+sub valid {
+	my ($class, $parser, $parent) = @_;
+	my $orig_token = $parser->get_token_idx();
+	if(PuppetParser::ResourceRef->valid($parser, $parent)) {
+		my $foo = PuppetParser::ResourceRef->new(parent => $parent, parser => $parser);
+		if($parser->scan_for_token(['QMARK'], [])) {
+			$parser->set_token_idx($orig_token);
+			return 1;
+		}
+	}
+	$parser->set_token_idx($orig_token);
+	return $class->SUPER::valid($parser, $parent);
+}
+
 sub parse {
 	my ($self) = @_;
-	$self->{varname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+	if(PuppetParser::ResourceRef->valid($self->{parser}, $self)) {
+		$self->{varname} = PuppetParser::ResourceRef->new(parent => $self, parser => $self->{parser});
+	} else {
+		$self->{varname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+	}
+	if(!$self->{parser}->scan_for_token(['QMARK'], [])) {
+		$self->{parser}->error("Did not find expected token '?'");
+	}
 	$self->{parser}->next_token();
 	if(!$self->{parser}->scan_for_token(['LBRACE'], [])) {
 		$self->{parser}->error("Did not find expected token '{'");
@@ -1076,7 +1097,7 @@ package PuppetParser::KeyValuePair;
 our @ISA = 'PuppetParser::Object';
 
 sub valid {
-	my ($class, $parser) = @_;
+	my ($class, $parser, $parent) = @_;
 	my $orig_token = $parser->get_token_idx();
 	if($parser->scan_for_token(['NAME', 'SQUOTES', 'DQUOTES', 'CLASSREF', 'DEFAULT', 'REGEX', 'NUMBER'], [])) {
 		$parser->next_token();
@@ -1085,6 +1106,14 @@ sub valid {
 			return 1;
 		}
 	}
+#	if(PuppetParser::ResourceRef->valid($parser, $parent)) {
+#		my $foo = PuppetParser::ResourceRef->new(parent => $parent, parser => $parser);
+#		if($parser->scan_for_token(['FARROW', 'PARROW'], [])) {
+#			$parser->set_token_idx($orig_token);
+#			return 1;
+#		}
+#	}
+	$parser->set_token_idx($orig_token);
 	return 0;
 }
 
@@ -1443,6 +1472,8 @@ our @res_title_patterns = (
 	['SQUOTES', 'COLON'],
 	['DQUOTES', 'COLON'],
 	['LBRACK'],
+	# This one is here to support ResourceRef (array ref in this case)
+	['DOLLAR_VAR'],
 );
 
 sub apply_defaults {
@@ -1518,6 +1549,12 @@ sub parse {
 		}
 		for my $pattern (@res_title_patterns) {
 			if($self->{parser}->match_token_sequence($pattern)) {
+				if(scalar(@{$pattern}) == 1 && $pattern->[0] eq 'DOLLAR_VAR') {
+					# Special handling for array ref
+					if(!PuppetParser::ResourceRef->valid($self->{parser}, $self)) {
+						next;
+					}
+				}
 				# It's a resource title
 				if(defined $self->{restitle}) {
 					# It's second resource title, oh noes!
@@ -1530,7 +1567,14 @@ sub parse {
 					$self->{parser}->next_token();
 					last TOKEN;
 				}
-				$self->{restitle} = $self->{parser}->scan_for_value($self, ['COLON']);
+				if(scalar(@{$pattern}) == 1 && $pattern->[0] eq 'DOLLAR_VAR') {
+					# Special handling for array ref
+					if(PuppetParser::ResourceRef->valid($self->{parser}, $self)) {
+						$self->{restitle} = PuppetParser::ResourceRef->new(parent => $self, parser => $self->{parser});
+					}
+				} else {
+					$self->{restitle} = $self->{parser}->scan_for_value($self, ['COLON']);
+				}
 				$self->{parser}->next_token();
 				next TOKEN;
 			}
@@ -1538,6 +1582,8 @@ sub parse {
 		if(PuppetParser::KeyValuePair->valid($self->{parser}, $self)) {
 			push @{$self->{items}}, PuppetParser::KeyValuePair->new(parent => $self, parser => $self->{parser});
 			next TOKEN;
+		} else {
+			print "Not a valid key/value pair\n";
 		}
 		$self->{parser}->error("Unexpected token '" . $self->{parser}->cur_token()->{text} . "'");
 	}
