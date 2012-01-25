@@ -489,6 +489,11 @@ sub apply_defaults {
 			$self->{level} = $self->parent()->{level} + 1;
 		}
 	}
+	if(!defined $self->{parser}) {
+		if(defined $self->{parent} && defined $self->{parent}->{parser}) {
+			$self->{parser} = $self->{parent}->{parser};
+		}
+	}
 }
 
 sub dump {
@@ -1129,20 +1134,84 @@ sub output {
 
 package PuppetParser::Class;
 
-use Data::Dumper;
-
 our @ISA = 'PuppetParser::Object';
 our @patterns = (
 	['CLASS', 'NAME'],
 );
+our $parser_data = { type => 'group', members => [
+	{ type => 'token', token => 'CLASS' },
+	{ name => 'classname', type => 'token', token => 'NAME' },
+	{ name => 'args', type => 'class', class => 'ArgumentList', optional => 1 },
+	{ type => 'group', optional => 1, members => [
+		{ type => 'token', token => 'INHERITS' },
+		{ name => 'inherits', type => 'token', token => 'NAME' },
+		], },
+	{ name => 'contents', type => 'block' },
+	],
+};
 
 sub apply_defaults {
 	my ($self) = @_;
 	$self->SUPER::apply_defaults({ inner_spacing => 1, outer_spacing => 1 });
 }
 
+sub get_parser_data {
+	return $parser_data;
+}
+
+sub parser_group {
+	my ($self, $parser, $node) = @_;
+	print "parser_group()\n";
+	my $ret = {};
+	for my $node (@{$node->{members}}) {
+		print "parser_group(): Looking at node\n";
+		print Dumper($node);
+		my $foo = $self->check_parser_node($parser, $node);
+		print "parser_group(): returned\n";
+		print Dumper($foo);
+		if(!defined $foo) {
+			if(!defined $node->{optional} || $node->{optional} == 0) {
+				return undef;
+			}
+		}
+		for(keys %{$foo}) {
+			$ret->{$_} = $foo->{$_};
+		}
+	}
+	return $ret;
+}
+
+sub parser_token {
+	my ($self, $parser, $node) = @_;
+	print "parser_token(): looking for token type " . $node->{token} . "\n";
+	print "parser_token(): cur_token is of type " . $parser->cur_token()->{type} . "\n";
+	if($parser->scan_for_token([$node->{token}])) {
+		my $ret = {};
+		my $child = PuppetParser::Simple->new(parent => $self);
+		if(defined $node->{name}) {
+			$ret->{$node->{name}} = $child;
+		}
+		return $ret;
+	}
+	return undef;
+}
+
+sub check_parser_node {
+	my ($self, $parser, $node) = @_;
+	print "check_parser_node()\n";
+	my $parser_func = 'parser_' . $node->{type};
+	if($self->can($parser_func)) {
+		return $self->$parser_func($parser, $node);
+	}
+	print STDERR "ERROR: Parsing function ${parser_func}() doesn't exist yet\n";
+	return undef;
+}
+
 sub parse {
 	my ($self) = @_;
+#	my $foo = $self->check_parser_node($self->{parser}, $self->get_parser_data());
+#	use Data::Dumper;
+#	print Dumper($foo);
 	$self->{parser}->next_token();
 	if(!$self->{parser}->scan_for_token(['NAME'])) {
 		$self->{parser}->error("Did not find expected token type after 'class'");
