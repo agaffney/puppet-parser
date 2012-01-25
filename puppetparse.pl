@@ -6,7 +6,6 @@ use warnings;
 package PuppetParser;
 
 use Parse::Lex;
-use Data::Dumper;
 
 my @keywords = (
 	"case",
@@ -467,8 +466,15 @@ sub new {
 		$self->{$_} = $args{$_};
 	}
 	$self->apply_defaults();
-	$self->parse();
+	my $parse = $self->parse();
+	if(defined $parse && $parse == 0) {
+		return undef;
+	}
 	return $self;
+}
+
+sub patterns {
+	return \@patterns;
 }
 
 sub apply_defaults {
@@ -1134,29 +1140,28 @@ sub output {
 
 package PuppetParser::Class;
 
+use Data::Dumper;
+
 our @ISA = 'PuppetParser::Object';
-our @patterns = (
-	['CLASS', 'NAME'],
-);
-our $parser_data = { type => 'group', members => [
-	{ type => 'token', token => 'CLASS' },
-	{ name => 'classname', type => 'token', token => 'NAME' },
-	{ name => 'args', type => 'class', class => 'ArgumentList', optional => 1 },
-	{ type => 'group', optional => 1, members => [
-		{ type => 'token', token => 'INHERITS' },
-		{ name => 'inherits', type => 'token', token => 'NAME' },
-		], },
-	{ name => 'contents', type => 'block' },
-	],
-};
+
+sub get_parser_data {
+	my ($self) = @_;
+	my $parser_data = [
+		{ type => 'token', token => 'CLASS' },
+		{ name => 'classname', type => 'token', token => 'NAME' },
+		{ name => 'args', type => 'class', class => 'ArgumentList', optional => 1 },
+		{ type => 'group', optional => 1, members => [
+			{ type => 'token', token => 'INHERITS' },
+			{ name => 'inherits', type => 'token', token => 'NAME' },
+			], },
+		{ name => 'contents', type => 'block' },
+	];
+	return $parser_data;
+}
 
 sub apply_defaults {
 	my ($self) = @_;
 	$self->SUPER::apply_defaults({ inner_spacing => 1, outer_spacing => 1 });
-}
-
-sub get_parser_data {
-	return $parser_data;
 }
 
 sub parser_group {
@@ -1165,10 +1170,7 @@ sub parser_group {
 	my $ret = {};
 	for my $node (@{$node->{members}}) {
 		print "parser_group(): Looking at node\n";
-		print Dumper($node);
 		my $foo = $self->check_parser_node($parser, $node);
-		print "parser_group(): returned\n";
-		print Dumper($foo);
 		if(!defined $foo) {
 			if(!defined $node->{optional} || $node->{optional} == 0) {
 				return undef;
@@ -1177,6 +1179,39 @@ sub parser_group {
 		for(keys %{$foo}) {
 			$ret->{$_} = $foo->{$_};
 		}
+	}
+	return $ret;
+}
+
+sub parser_class {
+	my ($self, $parser, $node) = @_;
+	my $ret = {};
+	my $foo = $node->{class}->new(parent => $self);
+	if(!defined $foo) {
+		return undef;
+	}
+	if(defined $node->{name}) {
+		$ret->{$node->{name}} = $foo;
+	}
+	return $ret;
+}
+
+sub parser_block {
+	my ($self, $parser, $node) = @_;
+	if(!$parser->scan_for_token(['LBRACE'], [])) {
+		return undef;
+	}
+	$parser->next_token();
+	my $ret = { contents => [] };
+	while(1) {
+		if($self->{parser}->scan_for_token(['RBRACE'], [])) {
+			$self->{parser}->next_token();
+			last;
+		}
+		if($self->{parser}->eof()) {
+			$self->{parser}->error("Unexpected end of file");
+		}
+		push @{$ret->{contents}}, $self->{parser}->scan_for_object($self);
 	}
 	return $ret;
 }
@@ -1200,8 +1235,16 @@ sub check_parser_node {
 	my ($self, $parser, $node) = @_;
 	print "check_parser_node()\n";
 	my $parser_func = 'parser_' . $node->{type};
+	my $orig_token = $parser->get_token_idx();
 	if($self->can($parser_func)) {
-		return $self->$parser_func($parser, $node);
+		my $foo = $self->$parser_func($parser, $node);
+		if(!defined $foo) {
+			if(!defined $node->{optional} || $node->{optional} == 0) {
+				$parser->set_token_idx($orig_token);
+				return undef;
+			}
+		}
+		return $foo;
 	}
 	print STDERR "ERROR: Parsing function ${parser_func}() doesn't exist yet\n";
 	return undef;
@@ -1209,7 +1252,11 @@ sub check_parser_node {
 
 sub parse {
 	my ($self) = @_;
-#	my $foo = $self->check_parser_node($self->{parser}, $self->get_parser_data());
+	my $foo = $self->check_parser_node($self->{parser}, { type => 'group', members => $self->get_parser_data() });
+	if(!defined $foo) {
+		return 0;
+	}
+	return 1;
 #	use Data::Dumper;
 #	print Dumper($foo);
 	$self->{parser}->next_token();
@@ -1242,10 +1289,6 @@ sub parse {
 	}
 	$self->{parser}->next_token();
 	$self->parse_children();
-}
-
-sub patterns {
-	return \@patterns;
 }
 
 sub output {
