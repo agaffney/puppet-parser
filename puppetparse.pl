@@ -1161,6 +1161,22 @@ sub parse {
 		$self->{parser}->error("Did not find expected token type after 'class'");
 	}
 	$self->{classname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+	$self->{args} = [];
+	if($self->{parser}->scan_for_token(['LPAREN'])) {
+		$self->{parser}->next_token();
+		while(1) {
+			if($self->{parser}->scan_for_token(['RPAREN'], [])) {
+				$self->{parser}->next_token();
+				last;
+			}
+			if($self->{parser}->scan_for_token(['COMMA'], [])) {
+				$self->{parser}->next_token();
+				next;
+			}
+			push @{$self->{args}}, $self->{parser}->scan_for_value($self, ['COMMA', 'RPAREN']);
+		}
+	}
+
 	if($self->{parser}->scan_for_token(['INHERITS'], [])) {
 		$self->{parser}->next_token();
 		$self->{inherits} = $self->{parser}->scan_for_value($self, ['LBRACE']);
@@ -1178,7 +1194,17 @@ sub patterns {
 
 sub output {
 	my ($self) = @_;
-	my $buf = $self->indent() . 'class ' . $self->{classname}->output() . ' {' . $self->nl();
+	my $buf = $self->indent() . 'class ' . $self->{classname}->output();
+	if(scalar(@{$self->{args}}) > 0) {
+		$buf .= ' (';
+		for(@{$self->{args}}) {
+			$buf .= $_->output() . ', ';
+		}
+		$buf =~ s/, $//;
+		$buf .= ')';
+	}
+	$buf .= ' {' . $self->nl();
+
 	$buf .= $self->output_children();
 	$buf .= '}' . $self->nl();
 	return $buf;
