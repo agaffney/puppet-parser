@@ -7,7 +7,6 @@ package PuppetParser;
 
 use Parse::Lex;
 use Data::Dumper;
-use JSON;
 
 my @keywords = (
 	"case",
@@ -30,6 +29,10 @@ my @keywords = (
 );
 
 my @tokens = (
+	"LLCOLLECT" => '<<\|',
+	"RRCOLLECT" => '\|>>',
+	"LCOLLECT" => '<\|',
+	"RCOLLECT" => '\|>',
 	"LBRACK" => '\[',
 	"RBRACK" => '\]',
 	"LBRACE" => '\{',
@@ -54,10 +57,6 @@ my @tokens = (
 	"OUT_EDGE" => '<-',
 	"IN_EDGE_SUB" => '~>',
 	"OUT_EDGE_SUB" => '<~',
-	"LLCOLLECT" => '<<\|',
-	"RRCOLLECT" => '\|>>',
-	"LCOLLECT" => '<\|',
-	"RCOLLECT" => '\|>',
 	"SEMIC" => ';',
 	"QMARK" => '\?',
 	"BACKSLASH" => '\\\\',
@@ -127,18 +126,6 @@ sub new {
 #		eval "use $_;";
 #	}
 	return $self;
-}
-
-sub output_json {
-	my ($self, $output) = @_;
-	my $json = JSON->new->pretty(1)->encode($self->{tree});
-	if(defined $output && $output ne '') {
-		open FOO, "> $output" or die "Could not open output file $output: $!";
-		print FOO $json;
-		close FOO;
-	} else {
-		print $json;
-	}
 }
 
 sub output {
@@ -1521,6 +1508,9 @@ sub valid {
 			return 1;
 		}
 	}
+	if($parser->match_token_sequence(['CLASSREF', 'LLCOLLECT'], [])) {
+		return 1;
+	}
 	if($parser->scan_for_token(['AT'], [])) {
 		# Virtual resource
 		$parser->next_token();
@@ -1550,6 +1540,11 @@ sub parse {
 		$self->{restype} = PuppetParser::ResourceRef->new(parent => $self, parser => $self->{parser});
 	} else {
 		$self->{restype} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+	}
+	if($self->{parser}->scan_for_token(['LLCOLLECT'], [])) {
+		$self->{parser}->next_token();
+		$self->{collect} = PuppetParser::Expression->new(parent => $self, parser => $self->{parser}, term => ['RRCOLLECT']);
+		$self->{parser}->next_token();
 	}
 	if(!$self->{parser}->scan_for_token(['LBRACE'])) {
 		$self->{parser}->error("Did not find expected token '{'");
@@ -1626,7 +1621,11 @@ sub output {
 			}
 		}
 	}
-	my $buf = $self->indent() . (defined $self->{special} ? $self->{special} : '') . $self->{restype}->output() . ' { ';
+	my $buf = $self->indent() . (defined $self->{special} ? $self->{special} : '') . $self->{restype}->output();
+	if(defined $self->{collect}) {
+		$buf .= ' <<| ' . $self->{collect}->output() . ' |>>';
+	}
+	$buf .= ' { ';
 	if(defined $self->{restitle}) {
 		$buf .= $self->{restitle}->output() . ':';
 	}
@@ -1652,16 +1651,12 @@ use Getopt::Std;
 # Flags
 my %options;
 my $output = '';
-my $json = 0;
 my $debug = 0;
 
 # Parse options
-my $result = getopts('jdo:', \%options);
+my $result = getopts('do:', \%options);
 if(defined $options{'o'}) {
 	$output = $options{'o'};
-}
-if(defined $options{'j'}) {
-	$json = $options{'j'};
 }
 if(defined $options{'d'}) {
 	$debug = $options{'d'};
@@ -1671,9 +1666,4 @@ my $file = shift;
 print "Parsing $file\n";
 my $parser = PuppetParser->new(file => $file, debug => $debug);
 $parser->parse();
-
-if($json) {
-	$parser->output_json($output);
-} else {
-	$parser->output($output);
-}
+$parser->output($output);
