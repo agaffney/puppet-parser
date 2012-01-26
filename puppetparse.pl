@@ -88,7 +88,7 @@ my @tokens = (
 );
 
 my @object_classes = (
-#	'PuppetParser::Newline',
+	'PuppetParser::Newline',
 	'PuppetParser::Comment',
 	'PuppetParser::MultilineComment',
 	'PuppetParser::Class',
@@ -373,7 +373,7 @@ sub match_token_sequence {
 sub scan_for_token {
 	my ($self, $types, $ignore) = @_;
 	if(!defined $ignore) {
-		$ignore = ['RETURN', 'COMMENT', 'MLCOMMENT'];
+		$ignore = [];
 	}
 	TOKEN: while(my $token = $self->cur_token()) {
 		for(@{$ignore}) {
@@ -433,7 +433,7 @@ sub scan_for_value {
 	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT', 'DEFAULT', 'REGEX', 'NUMBER', 'CLASSREF', 'LPAREN', 'REGEX', 'UNDEF'])) {
 		# This looks like a simple value
 		my $value = PuppetParser::Simple->new(parser => $self);
-		if(!$self->scan_for_token($term, [])) {
+		if(!$self->scan_for_token($term)) {
 			# This isn't a simple value after all
 			$self->set_token_idx($orig_token);
 			return PuppetParser::Expression->new(parent => $parent, parser => $self, term => $term);
@@ -589,17 +589,17 @@ sub parser_block {
 	my ($self, $parser, $node) = @_;
 	my $class = ref $self;
 #	print "${class}::parser_block()\n";
-	if(!$parser->scan_for_token(['LBRACE'], [])) {
+	if(!$parser->scan_for_token(['LBRACE'])) {
 		return undef;
 	}
 	$parser->next_token();
 	my $ret = { contents => [] };
 	while(1) {
-		if($self->{parser}->scan_for_token(['RBRACE'], [])) {
+		if($self->{parser}->scan_for_token(['RBRACE'])) {
 			$self->{parser}->next_token();
 			last;
 		}
-		if($self->{parser}->scan_for_token(['RETURN'], [])) {
+		if($self->{parser}->scan_for_token(['RETURN'])) {
 			$self->{parser}->next_token();
 			next;
 		}
@@ -620,13 +620,13 @@ sub parser_block {
 sub parser_token {
 	my ($self, $parser, $node) = @_;
 	my $class = ref $self;
-	if($class eq 'PuppetParser::Newline') {
-		print "${class}::parser_token(): looking for type " . $node->{token} . ", cur_token is type " . $parser->cur_token()->{type} . "\n";
-	}
+#	if($class eq 'PuppetParser::Newline') {
+#		print "${class}::parser_token(): looking for type " . $node->{token} . ", cur_token is type " . $parser->cur_token()->{type} . "\n";
+#	}
 	if(ref $node->{token} ne 'ARRAY') {
 		$node->{token} = [ $node->{token} ];
 	}
-	if($parser->scan_for_token($node->{token}, [])) {
+	if($parser->scan_for_token($node->{token})) {
 		my $ret = {};
 		my $child = PuppetParser::Simple->new(parent => $self);
 		if(defined $node->{name}) {
@@ -640,14 +640,14 @@ sub parser_token {
 sub check_parser_node {
 	my ($self, $parser, $node) = @_;
 	my $class = ref $self;
-	if($class eq 'PuppetParser::Newline') {
-		print "${class}::check_parser_node(): cur_token - type=" . $parser->cur_token()->{type} . ", idx=" . $parser->get_token_idx() . "\n";
-		print Dumper($node);
-	}
+#	if($class eq 'PuppetParser::Newline') {
+#		print "${class}::check_parser_node(): cur_token - type=" . $parser->cur_token()->{type} . ", idx=" . $parser->get_token_idx() . "\n";
+#		print Dumper($node);
+#	}
 	my $parser_func = 'parser_' . $node->{type};
-	if(!defined $node->{flags} || !defined $node->{flags}->{skip_return} || $node->{flags}->{skip_return} == 1) {
+	if($node->{type} ne 'group' && (!defined $node->{flags} || !defined $node->{flags}->{skip_return} || $node->{flags}->{skip_return} == 1)) {
 		while(1) {
-			if($parser->scan_for_token(['RETURN'], [])) {
+			if($parser->scan_for_token(['RETURN'])) {
 				print "${class}::check_parser_node(): skipping a RETURN\n";
 				$parser->next_token();
 			} else {
@@ -710,7 +710,7 @@ sub parse {
 sub parse_children {
 	my ($self) = @_;
 	while(1) {
-		if($self->{parser}->scan_for_token(['RBRACE'], [])) {
+		if($self->{parser}->scan_for_token(['RBRACE'])) {
 			$self->{parser}->next_token();
 			last;
 		}
@@ -978,15 +978,15 @@ sub parse {
 	my $packages = ['PuppetParser::FunctionCall', 'PuppetParser::List', 'PuppetParser::Hash', 'PuppetParser::Selector'];
 	$self->{parts} = [];
 	TOKEN: while(1) {
-		if($self->{parser}->scan_for_token($self->{term}, [])) {
+		if($self->{parser}->scan_for_token($self->{term})) {
 			last;
 		}
-		if($self->{parser}->scan_for_token(['RETURN'], [])) {
+		if($self->{parser}->scan_for_token(['RETURN'])) {
 			$self->{parser}->next_token();
 			next;
 		}
 		for my $package (@{$packages}) {
-			my $foo = $package->new(parent => $self);
+			my $foo = $package->new(parent => $self, embed => 1);
 			if(defined $foo) {
 				push @{$self->{parts}}, $foo;
 				next TOKEN;
@@ -1179,6 +1179,16 @@ sub get_parser_data {
 	return $parser_data;
 }
 
+sub output {
+	my ($self) = @_;
+	my $buf = '(';
+	if(defined $self->{args}) {
+		$buf .= $self->{args}->output();
+	}
+	$buf .= ')';
+	return $buf;
+}
+
 package PuppetParser::Class;
 
 use Data::Dumper;
@@ -1205,51 +1215,10 @@ sub apply_defaults {
 	$self->SUPER::apply_defaults({ inner_spacing => 1, outer_spacing => 1 });
 }
 
-sub parse {
-	my ($self) = @_;
-	my $foo = $self->check_parser_node($self->{parser}, { type => 'group', members => $self->get_parser_data() });
-	if(!defined $foo) {
-		return 0;
-	}
-	return 1;
-#	use Data::Dumper;
-#	print Dumper($foo);
-	$self->{parser}->next_token();
-	if(!$self->{parser}->scan_for_token(['NAME'])) {
-		$self->{parser}->error("Did not find expected token type after 'class'");
-	}
-	$self->{classname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
-	$self->{args} = [];
-	if($self->{parser}->scan_for_token(['LPAREN'])) {
-		$self->{parser}->next_token();
-		while(1) {
-			if($self->{parser}->scan_for_token(['RPAREN'], [])) {
-				$self->{parser}->next_token();
-				last;
-			}
-			if($self->{parser}->scan_for_token(['COMMA'], [])) {
-				$self->{parser}->next_token();
-				next;
-			}
-			push @{$self->{args}}, $self->{parser}->scan_for_value($self, ['COMMA', 'RPAREN']);
-		}
-	}
-
-	if($self->{parser}->scan_for_token(['INHERITS'], [])) {
-		$self->{parser}->next_token();
-		$self->{inherits} = $self->{parser}->scan_for_value($self, ['LBRACE']);
-	}
-	if(!$self->{parser}->scan_for_token(['LBRACE'])) {
-		$self->{parser}->error("Did not find expected token '{'");
-	}
-	$self->{parser}->next_token();
-	$self->parse_children();
-}
-
 sub output {
 	my ($self) = @_;
 	my $buf = $self->indent() . 'class ' . $self->{classname}->output();
-	if(scalar(@{$self->{args}}) > 0) {
+	if(defined $self->{args}) { #scalar(@{$self->{args}}) > 0) {
 		$buf .= ' (';
 		for(@{$self->{args}}) {
 			$buf .= $_->output() . ', ';
@@ -1277,7 +1246,7 @@ sub get_parser_data {
 	my ($self) = @_;
 	my $parser_data = [
 		{ type => 'token', token => 'DEFINE' },
-		{ name => 'classname', type => 'token', token => 'NAME' },
+		{ name => 'defname', type => 'token', token => 'NAME' },
 		{ name => 'args', type => 'class', class => 'PuppetParser::ArgumentList', optional => 1 },
 		{ name => 'contents', type => 'block' },
 	];
@@ -1286,12 +1255,11 @@ sub get_parser_data {
 
 sub output {
 	my ($self) = @_;
-	my $buf = $self->indent() . 'define ' . $self->{defname}->output() . '(';
-	for(@{$self->{args}}) {
-		$buf .= $_->output() . ', ';
+	my $buf = $self->indent() . 'define ' . $self->{defname}->output();
+	if(defined $self->{args}) {
+		$buf .= $self->{args}->output();
 	}
-	$buf =~ s/, $//;
-	$buf .= ') {' . $self->nl();
+	$buf .= ' {' . $self->nl();
 	$buf .= $self->output_children();
 	$buf .= $self->indent() . '}' . $self->nl();
 	return $buf;
@@ -1316,12 +1284,11 @@ sub get_parser_data {
 
 sub output {
 	my ($self) = @_;
-	my $buf = ($self->{embed} ? '' : $self->indent()) . $self->{funcname}->output() . '(';
-	for(@{$self->{args}}) {
-		$buf .= $_->output() . ', ';
+	my $buf = ($self->{embed} ? '' : $self->indent()) . $self->{funcname}->output();
+	if(defined $self->{args}) {
+		$buf .= $self->{args}->output();
 	}
-	$buf =~ s/, $//;
-	$buf .= ')' . ($self->{embed} ? '' : $self->nl());
+	$buf .= ($self->{embed} ? '' : $self->nl());
 	return $buf;
 }
 
@@ -1365,7 +1332,7 @@ sub get_parser_data {
 
 sub output {
 	my ($self) = @_;
-	return $self->indent() . $self->{funcname}->output() . ' ' . $self->{class}->output() . $self->nl();
+	return $self->indent() . $self->{funcname}->output() . ' ' . $self->{arg}->output() . $self->nl();
 }
 
 package PuppetParser::VarAssignment;
@@ -1399,7 +1366,7 @@ sub parse {
 	my ($self) = @_;
 	$self->{items} = [];
 	while(1) {
-		if($self->{parser}->scan_for_token(['RETURN'], [])) {
+		if($self->{parser}->scan_for_token(['RETURN'])) {
 			$self->{parser}->next_token();
 			last;
 		}
@@ -1407,7 +1374,7 @@ sub parse {
 			push @{$self->{items}}, PuppetParser::ResourceRef->new(parent => $self, parser => $self->{parser});
 			next;
 		}
-		if($self->{parser}->scan_for_token(['IN_EDGE', 'OUT_EDGE'], [])) {
+		if($self->{parser}->scan_for_token(['IN_EDGE', 'OUT_EDGE'])) {
 			push @{$self->{items}}, PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
 			next;
 		}
@@ -1472,35 +1439,12 @@ sub get_parser_data {
 	return $parser_data;
 }
 
-sub get_parser_data2 {
-	my $parser_data = [
-		{ type => 'token', token => 'AT', optional => 1 },
-		{ type => 'token', token => 'AT', optional => 1 },
-		{ type => 'token', token => ['NAME', 'CLASSREF', 'CLASS'], name => 'restype' },
-		{ type => 'token', token => 'LBRACE' },
-		{ type => 'token', token => ['NAME', 'SQUOTES', 'DQUOTES', 'DOLLAR_VAR'], name => 'restitle' },
-		{ type => 'token', token => 'COLON' },
-		{ type => 'class', class => 'PuppetParser::KeyValuePair', name => 'items' },
-		{ type => 'token', token => 'RBRACE' },
-	];
-	return $parser_data;
-}
-
 sub patterns {
 	return \@patterns;
 }
 
 sub output {
 	my ($self) = @_;
-	my $max_key_len = 0;
-	for(@{$self->{items}}) {
-		if($_->can('key_len')) {
-			my $key_len = $_->key_len();
-			if($key_len > $max_key_len) {
-				$max_key_len = $key_len;
-			}
-		}
-	}
 	my $buf = $self->indent() . (defined $self->{special} ? $self->{special} : '') . $self->{restype}->output();
 	if(defined $self->{collect}) {
 		$buf .= ' <<| ' . $self->{collect}->output() . ' |>>';
@@ -1509,16 +1453,28 @@ sub output {
 	if(defined $self->{restitle}) {
 		$buf .= $self->{restitle}->output() . ':';
 	}
-	if(scalar(@{$self->{items}}) > 0) {
-		$buf .= $self->nl();
-	}
-	for(@{$self->{items}}) {
-		if($_->can('set_max_key_len')) {
-			$_->set_max_key_len($max_key_len);
+	if(defined $self->{items}) {
+		if(ref $self->{items} ne 'ARRAY') {
+			$self->{items} = [ $self->{items} ];
 		}
-		$buf .= $_->output();
+		my $max_key_len = 0;
+		for(@{$self->{items}}) {
+			if($_->can('key_len')) {
+				my $key_len = $_->key_len();
+				if($key_len > $max_key_len) {
+					$max_key_len = $key_len;
+				}
+			}
+		}
+		$buf .= $self->nl();
+		for(@{$self->{items}}) {
+			if($_->can('set_max_key_len')) {
+				$_->set_max_key_len($max_key_len);
+			}
+			$buf .= $_->output();
+		}
 	}
-	$buf .= (scalar(@{$self->{items}}) > 0 ? $self->indent() : ' ') . '}' . $self->nl();
+	$buf .= (defined $self->{items} ? $self->indent() : ' ') . '}' . $self->nl();
 	return $buf;
 }
 
