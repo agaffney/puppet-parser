@@ -800,6 +800,9 @@ sub get_parser_data {
 sub output {
 	my ($self) = @_;
 	my $buf = '[' . $self->nl();
+	if(ref $self->{items} ne 'ARRAY') {
+		$self->{items} = [ $self->{items} ];
+	}
 	for(@{$self->{items}}) {
 		if($_->isa('PuppetParser::Comment')) {
 			$buf .= $_->output();
