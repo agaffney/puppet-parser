@@ -773,20 +773,6 @@ sub nl {
 	return "\n";
 }
 
-sub valid {
-	my ($class, $parser, $parent) = @_;
-	my $patterns = $class->patterns();
-	if(scalar(@{$patterns}) > 0) {
-		for my $pattern (@{$patterns}) {
-			if($parser->match_token_sequence($pattern, [])) {
-				return 1;
-			}
-		}
-		return 0;
-	}
-	return 1;
-}
-
 sub output {
 	my ($self) = @_;
 	return $self->indent() . "<Placeholder for " . $self . ">" . $self->nl();
@@ -868,14 +854,6 @@ sub get_parser_data {
 	return $parser_data;
 }
 
-sub old_parse {
-	my ($self) = @_;
-	my $token = $self->{parser}->cur_token();
-	$self->{comment} = $token->{text};
-	$self->{comment} =~ s/^[#\s]+//;
-	$self->{parser}->next_token();
-}
-
 sub output {
 	my ($self) = @_;
 	return $self->indent() . '# ' . $self->{comment} . $self->nl();
@@ -890,13 +868,6 @@ sub get_parser_data {
 		{ type => 'token', token => 'MLCOMMENT', name => 'comment' },
 	];
 	return $parser_data;
-}
-
-sub old_parse {
-	my ($self) = @_;
-	my $token = $self->{parser}->cur_token();
-	$self->{comment} = $token->{text};
-	$self->{parser}->next_token();
 }
 
 sub output {
@@ -916,31 +887,6 @@ sub get_parser_data {
 		{ type => 'token', token => ['RBRACK'] },
 	];
 	return $parser_data;
-}
-
-sub valid {
-	my ($class, $parser) = @_;
-	my $orig_token = $parser->get_token_idx();
-	if($parser->scan_for_token(['CLASSREF', 'DOLLAR_VAR'], [])) {
-		$parser->next_token();
-		if($parser->scan_for_token(['LBRACK'], [])) {
-			$parser->next_token();
-			if($parser->scan_for_token(['NAME', 'SQUOTES', 'DQUOTES', 'DOLLAR_VAR', 'NUMBER'], [])) {
-				$parser->set_token_idx($orig_token);
-				return 1;
-			}
-		}
-	}
-	$parser->set_token_idx($orig_token);
-	return 0;
-}
-
-sub old_parse {
-	my ($self) = @_;
-	$self->{restype} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
-	$self->{parser}->next_token();
-	$self->{inner} = $self->{parser}->scan_for_value($self, ['RBRACK']);
-	$self->{parser}->next_token();
 }
 
 sub output {
@@ -971,31 +917,6 @@ sub get_parser_data {
 	return $parser_data;
 }
 
-sub old_parse {
-	my ($self) = @_;
-	$self->{items} = [];
-	if(!$self->{parser}->scan_for_token([$self->{start}], [])) {
-		# The sky is falling
-		$self->{parser}->error("Did not find expected token '" . $self->{start} . "'");
-	}
-	$self->{parser}->next_token();
-	while(1) {
-		if($self->{parser}->scan_for_token([$self->{end}], [])) {
-			$self->{parser}->next_token();
-			last;
-		}
-		if($self->{parser}->scan_for_token(['COMMA', 'RETURN'], [])) {
-			$self->{parser}->next_token();
-			next;
-		}
-		if($self->{parser}->scan_for_token(['COMMENT'], [])) {
-			push @{$self->{items}}, PuppetParser::Comment->new(parent => $self, parser => $self->{parser});
-			next;
-		}
-		push @{$self->{items}}, $self->{parser}->scan_for_value($self, ['COMMA', $self->{end}]);
-	}
-}
-
 sub output {
 	my ($self) = @_;
 	my $buf = '[' . $self->nl();
@@ -1021,31 +942,6 @@ sub get_parser_data {
 		{ type => 'token', token => 'RBRACE' },
 	];
 	return $parser_data;
-}
-
-sub old_parse {
-	my ($self) = @_;
-	$self->{parser}->next_token();
-	$self->{items} = [];
-	while(1) {
-		if($self->{parser}->scan_for_token(['COMMA', 'RETURN'], [])) {
-			$self->{parser}->next_token();
-			next;
-		}
-		if($self->{parser}->scan_for_token(['RBRACE'], [])) {
-			$self->{parser}->next_token();
-			last;
-		}
-		if($self->{parser}->scan_for_token(['COMMENT'], [])) {
-			push @{$self->{items}}, PuppetParser::Comment->new(parent => $self, parser => $self->{parser});
-			next;
-		}
-		if(PuppetParser::KeyValuePair->valid($self->{parser}, $self)) {
-			push @{$self->{items}}, PuppetParser::KeyValuePair->new(parent => $self, parser => $self->{parser});
-			next;
-		}
-		$self->{parser}->error("Unexpected token '" . $self->{parser}->cur_token()->{text} . "'");
-	}
 }
 
 sub output {
@@ -1124,57 +1020,6 @@ sub get_parser_data {
 	return $parser_data;
 }
 
-sub valid {
-	my ($class, $parser, $parent) = @_;
-	my $orig_token = $parser->get_token_idx();
-	if(PuppetParser::ResourceRef->valid($parser, $parent)) {
-		my $foo = PuppetParser::ResourceRef->new(parent => $parent, parser => $parser);
-		if($parser->scan_for_token(['QMARK'], [])) {
-			$parser->set_token_idx($orig_token);
-			return 1;
-		}
-	}
-	$parser->set_token_idx($orig_token);
-	return $class->SUPER::valid($parser, $parent);
-}
-
-sub old_parse {
-	my ($self) = @_;
-	if(PuppetParser::ResourceRef->valid($self->{parser}, $self)) {
-		$self->{varname} = PuppetParser::ResourceRef->new(parent => $self, parser => $self->{parser});
-	} else {
-		$self->{varname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
-	}
-	if(!$self->{parser}->scan_for_token(['QMARK'], [])) {
-		$self->{parser}->error("Did not find expected token '?'");
-	}
-	$self->{parser}->next_token();
-	if(!$self->{parser}->scan_for_token(['LBRACE'], [])) {
-		$self->{parser}->error("Did not find expected token '{'");
-	}
-	$self->{parser}->next_token();
-	$self->{items} = [];
-	while(1) {
-		if($self->{parser}->scan_for_token(['COMMA', 'RETURN'], [])) {
-			$self->{parser}->next_token();
-			next;
-		}
-		if($self->{parser}->scan_for_token(['RBRACE'], [])) {
-			$self->{parser}->next_token();
-			last;
-		}
-		if($self->{parser}->scan_for_token(['COMMENT'], [])) {
-			push @{$self->{items}}, PuppetParser::Comment->new(parent => $self, parser => $self->{parser});
-			next;
-		}
-		if(PuppetParser::KeyValuePair->valid($self->{parser}, $self)) {
-			push @{$self->{items}}, PuppetParser::KeyValuePair->new(parent => $self, parser => $self->{parser});
-			next;
-		}
-		$self->{parser}->error("Unexpected token '" . $self->{parser}->cur_token()->{text} . "'");
-	}
-}
-
 sub output {
 	my ($self) = @_;
 	my $max_key_len = 0;
@@ -1219,14 +1064,6 @@ sub apply_defaults {
 	$self->SUPER::apply_defaults({ inner_spacing => 0, outer_spacing => 1 });
 }
 
-sub old_parse {
-	my ($self) = @_;
-	$self->{parser}->next_token();
-	$self->{casevar} = $self->{parser}->scan_for_value($self, ['LBRACE']);
-	$self->{parser}->next_token();
-	$self->parse_children();
-}
-
 sub output {
 	my ($self) = @_;
 	my $buf = $self->indent() . 'case ' . $self->{casevar}->output() . ' {' . $self->nl();
@@ -1255,17 +1092,6 @@ sub get_parser_data {
 sub apply_defaults {
 	my ($self) = @_;
 	$self->SUPER::apply_defaults({ outer_spacing => 1 });
-}
-
-sub old_parse {
-	my ($self) = @_;
-	$self->{parser}->next_token();
-	if(!$self->{parser}->scan_for_token(['SQUOTES', 'DQUOTES', 'NAME', 'REGEX', 'DEFAULT'], [])) {
-		$self->{parser}->error("Unexpected token after 'node'");
-	}
-	$self->{nodename} = $self->{parser}->scan_for_value($self, ['LBRACE']);
-	$self->{parser}->next_token();
-	$self->parse_children();
 }
 
 sub output {
@@ -1301,27 +1127,6 @@ sub get_parser_data {
 	return $parser_data;
 }
 
-sub valid {
-	my ($class, $parser, $parent) = @_;
-	my $orig_token = $parser->get_token_idx();
-	if(!$parent->isa('PuppetParser::CaseStatement')) {
-		# If the parent isn't a CaseStatement, this shouldn't be a CaseCondition
-		return 0;
-	}
-	return $class->SUPER::valid($parser, $parent);
-}
-
-sub old_parse {
-	my ($self) = @_;
-	$self->{condition} = $self->{parser}->scan_for_value($self, ['COLON']);
-	$self->{parser}->next_token();
-	if(!$self->{parser}->scan_for_token(['LBRACE'], [])) {
-		$self->{parser}->error("Did not find expecte token '{'");
-	}
-	$self->{parser}->next_token();
-	$self->parse_children();
-}
-
 sub output {
 	my ($self) = @_;
 	my $buf = $self->indent() . $self->{condition}->output() . ': {' . $self->nl();
@@ -1344,27 +1149,6 @@ sub get_parser_data {
 	return $parser_data;
 }
 
-sub valid {
-	my ($class, $parser, $parent) = @_;
-	my $orig_token = $parser->get_token_idx();
-	if($parser->scan_for_token(['NAME', 'SQUOTES', 'DQUOTES', 'CLASSREF', 'DEFAULT', 'REGEX', 'NUMBER'], [])) {
-		$parser->next_token();
-		if($parser->scan_for_token(['FARROW', 'PARROW'], [])) {
-			$parser->set_token_idx($orig_token);
-			return 1;
-		}
-	}
-#	if(PuppetParser::ResourceRef->valid($parser, $parent)) {
-#		my $foo = PuppetParser::ResourceRef->new(parent => $parent, parser => $parser);
-#		if($parser->scan_for_token(['FARROW', 'PARROW'], [])) {
-#			$parser->set_token_idx($orig_token);
-#			return 1;
-#		}
-#	}
-	$parser->set_token_idx($orig_token);
-	return 0;
-}
-
 sub key_len {
 	my ($self) = @_;
 	return length($self->{key}->output());
@@ -1373,13 +1157,6 @@ sub key_len {
 sub set_max_key_len {
 	my ($self, $len) = @_;
 	$self->{max_key_len} = $len;
-}
-
-sub old_parse {
-	my ($self) = @_;
-	$self->{key} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
-	$self->{parser}->next_token();
-	$self->{value} = $self->{parser}->scan_for_value($self, ['COMMA', 'SEMIC', 'RETURN', 'RBRACE']);
 }
 
 sub output {
@@ -1507,38 +1284,6 @@ sub get_parser_data {
 	return $parser_data;
 }
 
-sub old_parse {
-	my ($self) = @_;
-	$self->{parser}->next_token();
-	if(!$self->{parser}->scan_for_token(['NAME'], [])) {
-		$self->{parser}->error("Unexpected token after 'define'");
-	}
-	$self->{defname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
-	$self->{args} = [];
-	if($self->{parser}->scan_for_token(['LPAREN'])) {
-		$self->{parser}->next_token();
-		while(1) {
-			if($self->{parser}->scan_for_token(['RPAREN'], [])) {
-				$self->{parser}->next_token();
-				last;
-			}
-			if($self->{parser}->scan_for_token(['COMMA'], [])) {
-				$self->{parser}->next_token();
-				next;
-			}
-			push @{$self->{args}}, $self->{parser}->scan_for_value($self, ['COMMA', 'RPAREN']);
-		}
-	}
-	if($self->{parser}->scan_for_token(['RETURN'], [])) {
-		$self->{parser}->next_token();
-	}
-	if(!$self->{parser}->scan_for_token(['LBRACE'], [])) {
-		$self->{parser}->error("Unexpected token");
-	}
-	$self->{parser}->next_token();
-	$self->parse_children();
-}
-
 sub output {
 	my ($self) = @_;
 	my $buf = $self->indent() . 'define ' . $self->{defname}->output() . '(';
@@ -1564,52 +1309,10 @@ sub get_parser_data {
 	return $parser_data;
 }
 
-sub valid {
-	my ($class, $parser, $parent) = @_;
-	my $token = $parser->cur_token();
-	if($token->{text} eq 'realize') {
-		return 1;
-	}
-	return $class->SUPER::valid($parser, $parent);
-}
-
 #sub apply_defaults {
 #	my ($self) = @_;
 #	$self->SUPER::apply_defaults({ outer_spacing => 1 });
 #}
-
-sub old_parse {
-	my ($self) = @_;
-	$self->{funcname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
-	if(!$self->{parser}->scan_for_token(['LPAREN'])) {
-#		$self->{parser}->error("Did not find expected token '('");
-		# This is a function call without parens
-		$self->{bare} = 1;
-	} else {
-		$self->{bare} = 0;
-		$self->{parser}->next_token();
-	}
-	$self->{args} = [];
-	while(1) {
-		if($self->{parser}->scan_for_token(['RETURN'], [])) {
-			$self->{parser}->next_token();
-			if($self->{bare}) {
-				last;
-			} else {
-				next;
-			}
-		}
-		if($self->{parser}->scan_for_token(['RPAREN'], [])) {
-			$self->{parser}->next_token();
-			last;
-		}
-		if($self->{parser}->scan_for_token(['COMMA'], [])) {
-			$self->{parser}->next_token();
-			next;
-		}
-		push @{$self->{args}}, $self->{parser}->scan_for_value($self, ['COMMA', 'RPAREN', 'RETURN']);
-	}
-}
 
 sub output {
 	my ($self) = @_;
@@ -1640,19 +1343,6 @@ sub get_parser_data {
 	return $parser_data;
 }
 
-sub old_parse {
-	my ($self) = @_;
-	$self->{variant} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
-	if($self->{parser}->scan_for_token(['RETURN'], [])) {
-		$self->{parser}->next_token();
-	}
-	if(!$self->{parser}->scan_for_token(['LBRACE'], [])) {
-		$self->{condition} = $self->{parser}->scan_for_value($self, ['LBRACE']);
-	}
-	$self->{parser}->next_token();
-	$self->parse_children();
-}
-
 sub output {
 	my ($self) = @_;
 	my $buf = $self->indent() . $self->{variant}->output() . (defined $self->{condition} ? (' ' . $self->{condition}->output()) : '') . ' {' . $self->nl();
@@ -1673,16 +1363,6 @@ sub get_parser_data {
 	return $parser_data;
 }
 
-sub old_parse {
-	my ($self) = @_;
-	$self->{funcname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
-	if(!$self->{parser}->scan_for_token(['NAME', 'DOLLAR_VAR', 'SQUOTES', 'DQUOTES'])) {
-		print "Type=" . $self->{parser}->cur_token()->{type} . "\n";
-		$self->{parser}->error("Did not find expected token after 'include'");
-	}
-	$self->{class} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
-}
-
 sub output {
 	my ($self) = @_;
 	return $self->indent() . $self->{funcname}->output() . ' ' . $self->{class}->output() . $self->nl();
@@ -1701,17 +1381,6 @@ sub get_parser_data {
 	return $parser_data;
 }
 
-sub old_parse {
-	my ($self) = @_;
-	$self->{varname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
-	if(!$self->{parser}->scan_for_token(['EQUALS'])) {
-		$self->{parser}->error("Did not find expected token '=' after '" . $self->{varname}->{text} . "'");
-	}
-	$self->{parser}->next_token();
-	$self->{value} = $self->{parser}->scan_for_value($self, ['RETURN', 'RBRACE']);
-	#$self->{parser}->next_token();
-}
-
 sub output {
 	my ($self) = @_;
 	return $self->indent() . $self->{varname}->output() . ' = ' . $self->{value}->output() . $self->nl();
@@ -1720,20 +1389,6 @@ sub output {
 package PuppetParser::DependencyChain;
 
 our @ISA = 'PuppetParser::Object';
-
-sub valid {
-	my ($class, $parser, $parent) = @_;
-	my $orig_token = $parser->get_token_idx();
-	if(PuppetParser::ResourceRef->valid($parser, $parent)) {
-		my $foo = PuppetParser::ResourceRef->new(parent => $parent, parser => $parser);
-		if($parser->scan_for_token(['IN_EDGE', 'OUT_EDGE'], [])) {
-			$parser->set_token_idx($orig_token);
-			return 1;
-		}
-	}
-	$parser->set_token_idx($orig_token);
-	return 0;
-}
 
 sub apply_defaults {
 	my ($self) = @_;
@@ -1819,6 +1474,8 @@ sub get_parser_data {
 
 sub get_parser_data2 {
 	my $parser_data = [
+		{ type => 'token', token => 'AT', optional => 1 },
+		{ type => 'token', token => 'AT', optional => 1 },
 		{ type => 'token', token => ['NAME', 'CLASSREF', 'CLASS'], name => 'restype' },
 		{ type => 'token', token => 'LBRACE' },
 		{ type => 'token', token => ['NAME', 'SQUOTES', 'DQUOTES', 'DOLLAR_VAR'], name => 'restitle' },
@@ -1831,118 +1488,6 @@ sub get_parser_data2 {
 
 sub patterns {
 	return \@patterns;
-}
-
-sub valid {
-	my ($class, $parser, $parent) = @_;
-	my $orig_token = $parser->get_token_idx();
-	if(PuppetParser::ResourceRef->valid($parser, $parent)) {
-		my $foo = PuppetParser::ResourceRef->new(parent => $parent, parser => $parser);
-		if($parser->scan_for_token(['LBRACE'], [])) {
-			$parser->set_token_idx($orig_token);
-			return 1;
-		}
-	}
-	if($parser->match_token_sequence(['CLASSREF', 'LLCOLLECT'], [])) {
-		return 1;
-	}
-	if($parser->scan_for_token(['AT'], [])) {
-		# Virtual resource
-		$parser->next_token();
-		if($parser->scan_for_token(['AT'], [])) {
-			# Exported resource
-			$parser->next_token();
-		}
-	} else {
-		$parser->set_token_idx($orig_token);
-	}
-	my $valid = $class->SUPER::valid($parser, $parent);
-	$parser->set_token_idx($orig_token);
-	return $valid;
-}
-
-sub old_parse {
-	my ($self) = @_;
-	if($self->{parser}->scan_for_token(['AT'], [])) {
-		$self->{special} = '@';
-		$self->{parser}->next_token();
-		if($self->{parser}->scan_for_token(['AT'], [])) {
-			$self->{special} = '@@';
-			$self->{parser}->next_token();
-		}
-	}
-	if(PuppetParser::ResourceRef->valid($self->{parser}, $self)) {
-		$self->{restype} = PuppetParser::ResourceRef->new(parent => $self, parser => $self->{parser});
-	} else {
-		$self->{restype} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
-	}
-	if($self->{parser}->scan_for_token(['LLCOLLECT'], [])) {
-		$self->{parser}->next_token();
-		$self->{collect} = PuppetParser::Expression->new(parent => $self, parser => $self->{parser}, term => ['RRCOLLECT']);
-		$self->{parser}->next_token();
-	}
-	if(!$self->{parser}->scan_for_token(['LBRACE'])) {
-		$self->{parser}->error("Did not find expected token '{'");
-	}
-	$self->{parser}->next_token();
-	TOKEN: while(1) {
-		if($self->{parser}->scan_for_token(['RBRACE'], [])) {
-			$self->{parser}->next_token();
-			last TOKEN;
-		}
-		if($self->{parser}->scan_for_token(['RETURN'], [])) {
-			# Skip a newline
-			$self->{parser}->next_token();
-			next TOKEN;
-		}
-		if($self->{parser}->scan_for_token(['COMMENT'], ['RETURN'])) {
-			push @{$self->{items}}, PuppetParser::Comment->new(parent => $self, parser => $self->{parser});
-			next TOKEN;
-		}
-		if($self->{parser}->scan_for_token(['COMMA', 'SEMIC'], [])) {
-			$self->{parser}->next_token();
-			next TOKEN;
-		}
-		for my $pattern (@res_title_patterns) {
-			if($self->{parser}->match_token_sequence($pattern)) {
-				if(scalar(@{$pattern}) == 1 && $pattern->[0] eq 'DOLLAR_VAR') {
-					# Special handling for array ref
-					if(!PuppetParser::ResourceRef->valid($self->{parser}, $self)) {
-						next;
-					}
-				}
-				# It's a resource title
-				if(defined $self->{restitle}) {
-					# It's second resource title, oh noes!
-					$self->{parser}->inject_tokens([
-						{ type => 'RBRACE', text => '}', line => -1 },
-						{ type => 'RETURN', text => "\n", line => -1 },
-						{ type => 'NAME', text => $self->{restype}->{text}, line => -1 },
-						{ type => 'LBRACE', text => '{', line => -1 },
-					]);
-					$self->{parser}->next_token();
-					last TOKEN;
-				}
-				if(scalar(@{$pattern}) == 1 && $pattern->[0] eq 'DOLLAR_VAR') {
-					# Special handling for array ref
-					if(PuppetParser::ResourceRef->valid($self->{parser}, $self)) {
-						$self->{restitle} = PuppetParser::ResourceRef->new(parent => $self, parser => $self->{parser});
-					}
-				} else {
-					$self->{restitle} = $self->{parser}->scan_for_value($self, ['COLON']);
-				}
-				$self->{parser}->next_token();
-				next TOKEN;
-			}
-		}
-		if(PuppetParser::KeyValuePair->valid($self->{parser}, $self)) {
-			push @{$self->{items}}, PuppetParser::KeyValuePair->new(parent => $self, parser => $self->{parser});
-			next TOKEN;
-		} else {
-			print "Not a valid key/value pair\n";
-		}
-		$self->{parser}->error("Unexpected token '" . $self->{parser}->cur_token()->{text} . "'");
-	}
 }
 
 sub output {
