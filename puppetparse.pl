@@ -6,6 +6,7 @@ use warnings;
 package PuppetParser;
 
 use Parse::Lex;
+use Data::Dumper;
 
 my @keywords = (
 	"case",
@@ -88,10 +89,10 @@ my @tokens = (
 
 my @object_classes = (
 	'PuppetParser::Class',
-	'PuppetParser::Resource',
-	'PuppetParser::Include',
 	'PuppetParser::FunctionCall',
+	'PuppetParser::Resource',
 	'PuppetParser::IfStatement',
+	'PuppetParser::Include',
 	'PuppetParser::VarAssignment',
 	'PuppetParser::CaseStatement',
 	'PuppetParser::CaseCondition',
@@ -164,7 +165,7 @@ sub parse {
 	$self->read_tokens();
 
 	# Start the process
-	$self->{tree} = PuppetParser::Object->new(type => 'ROOT', level => -1);
+	$self->{tree} = PuppetParser::Object->new(type => 'ROOT', level => -1, parser => $self);
 	while($self->cur_token()) {
 		$self->{tree}->add_child($self->scan_for_object($self->{tree}));
 	}
@@ -399,16 +400,15 @@ sub scan_for_object {
 #	print "Content:->", $token->{text}, "<-\n";
 	my $orig_token = $self->get_token_idx();
 	my $cur_token = undef;
-	PACKAGE: for my $package (@object_classes) {
-#		PATTERN: for my $pattern (@{$package->patterns()}) {
-#			if($self->match_token_sequence($pattern, [])) {
-				if($package->valid($self, $parent)) {
-					return $package->new(parent => $parent, parser => $self);
-				} else {
-					next PACKAGE;
-				}
-#			}
-#		}
+	for my $package (@object_classes) {
+		print "scan_for_object(): trying $package\n";
+		my $foo = $package->new(parent => $parent);
+		if(!defined $foo) {
+			print "scan_for_object(): nope, not that one\n";
+			next;
+		}
+		print "scan_for_object(): yes, it is a $package\n";
+		return $foo;
 	}
 	$self->set_token_idx($orig_token);
 	# We don't know how to handle this
@@ -460,6 +460,7 @@ our @patterns = ();
 
 sub new {
 	my ($class, %args) = @_;
+	print "${class}::new()\n";
 	my $self = { contents => [] };
 	bless($self, $class);
 	for(keys %args) {
@@ -469,6 +470,11 @@ sub new {
 	my $parse = $self->parse();
 	if(defined $parse && $parse == 0) {
 		return undef;
+	}
+	if(!defined $self->{type} || $self->{type} ne 'ROOT') {
+		$self->{parser} = undef;
+		$self->{parent} = undef;
+		$self->dump();
 	}
 	return $self;
 }
@@ -502,16 +508,163 @@ sub apply_defaults {
 	}
 }
 
+sub get_parser_data {
+	return [];
+}
+
 sub dump {
 	my ($self) = @_;
 	my $d = Data::Dumper->new([$self], ['tree']);
 	$d->Indent(4);
-	$d->Seen({'*parser_purposely_filtered' => $self->{parser}});
+#	$d->Seen({ '*parser' => $self->{parser} });
 	print $d->Dump;
 }
 
+sub parser_group {
+	my ($self, $parser, $node) = @_;
+	my $class = ref $self;
+	print "${class}::parser_group()\n";
+	my $ret = {};
+	for my $node (@{$node->{members}}) {
+		my $foo = $self->check_parser_node($parser, $node);
+		if(!defined $foo) {
+			if(!defined $node->{optional} || $node->{optional} == 0) {
+				return undef;
+			}
+		}
+		for(keys %{$foo}) {
+			$ret->{$_} = $foo->{$_};
+		}
+	}
+	return $ret;
+}
+
+sub parser_class {
+	my ($self, $parser, $node) = @_;
+	my $class = ref $self;
+	print "${class}::parser_class(): looking for class type " . $node->{class} . "\n";
+	my $ret = {};
+	my %args = ( parent => $self );
+	if(defined $node->{args}) {
+		for(keys %{$node->{args}}) {
+			$args{$_} = $node->{args}->{$_};
+		}
+	}
+	my $foo = $node->{class}->new(%args);
+	if(!defined $foo) {
+		return undef;
+	}
+	if(defined $node->{name}) {
+		$ret->{$node->{name}} = $foo;
+	}
+	return $ret;
+}
+
+sub parser_block {
+	my ($self, $parser, $node) = @_;
+	my $class = ref $self;
+	print "${class}::parser_block()\n";
+	if(!$parser->scan_for_token(['LBRACE'], [])) {
+		return undef;
+	}
+	$parser->next_token();
+	my $ret = { contents => [] };
+	while(1) {
+		if($self->{parser}->scan_for_token(['RBRACE'], [])) {
+			$self->{parser}->next_token();
+			last;
+		}
+		if($self->{parser}->eof()) {
+			$self->{parser}->error("Unexpected end of file");
+		}
+		my $foo = $self->{parser}->scan_for_object($self);
+		if(!defined $foo) {
+			return undef;
+		}
+		push @{$ret->{contents}}, $foo;
+	}
+	return $ret;
+}
+
+sub parser_token {
+	my ($self, $parser, $node) = @_;
+	my $class = ref $self;
+	print "${class}::parser_token(): looking for type " . $node->{token} . ", cur_token is type " . $parser->cur_token()->{type} . "\n";
+	if(ref $node->{token} ne 'ARRAY') {
+		$node->{token} = [ $node->{token} ];
+	}
+	if($parser->scan_for_token($node->{token})) {
+		my $ret = {};
+		my $child = PuppetParser::Simple->new(parent => $self);
+		if(defined $node->{name}) {
+			$ret->{$node->{name}} = $child;
+		}
+		return $ret;
+	}
+	return undef;
+}
+
+sub check_parser_node {
+	my ($self, $parser, $node) = @_;
+	my $class = ref $self;
+	print "${class}::check_parser_node(): cur_token - type=" . $parser->cur_token()->{type} . ", idx=" . $parser->get_token_idx() . "\n";
+	my $parser_func = 'parser_' . $node->{type};
+	if(!defined $node->{flags} || !defined $node->{flags}->{skip_return} || $node->{flags}->{skip_return} == 1) {
+		while(1) {
+			if($parser->scan_for_token(['RETURN'], [])) {
+				$parser->next_token();
+			} else {
+				last;
+			}
+		}
+	}
+	my $orig_token = $parser->get_token_idx();
+	if($self->can($parser_func)) {
+		my $ret = {};
+		while(1) {
+			my $foo = $self->$parser_func($parser, $node);
+			if(!defined $foo) {
+				if(defined $node->{many} && $node->{many} == 1) {
+					if(scalar(keys %{$ret}) > 0) {
+						last;
+					}
+				}
+				if(!defined $node->{optional} || $node->{optional} == 0) {
+					$parser->set_token_idx($orig_token);
+					return undef;
+				}
+				last;
+			}
+			for(keys %{$foo}) {
+				if(defined $ret->{$_}) {
+					if(ref $ret->{$_} ne 'ARRAY') {
+						$ret->{$_} = [ $ret->{$_} ];
+					}
+					push @{$ret->{$_}}, $foo->{$_};
+				} else {
+					$ret->{$_} = $foo->{$_};
+				}
+			}
+			if(!defined $node->{many} || $node->{many} == 0) {
+				last;
+			}
+		}
+		return $ret;
+	}
+	print STDERR "ERROR: Parsing function ${parser_func}() doesn't exist yet\n";
+	return undef;
+}
+
 sub parse {
-	return;
+	my ($self) = @_;
+	my $foo = $self->check_parser_node($self->{parser}, { type => 'group', members => $self->get_parser_data() });
+	if(!defined $foo) {
+		return 0;
+	}
+	for(keys %{$foo}) {
+		$self->{$_} = $foo->{$_};
+	}
+	return 1;
 }
 
 sub parse_children {
@@ -876,12 +1029,17 @@ sub parse {
 			$self->{parser}->next_token();
 			next;
 		}
-		if(PuppetParser::FunctionCall->valid($self->{parser}, $self)) {
-			push @{$self->{parts}}, PuppetParser::FunctionCall->new(parent => $self, parser => $self->{parser}, embed => 1);
+		my $foo = PuppetParser::FunctionCall->new(parent => $self);
+		if(defined $foo) {
+			push @{$self->{parts}}, $foo;
 			next;
 		}
-		push @{$self->{parts}}, PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
+		push @{$self->{parts}}, PuppetParser::Simple->new(parent => $self);
 	}
+	if(scalar(@{$self->{parts}}) == 0) {
+		return 0;
+	}
+	return 1;
 }
 
 sub output {
@@ -1136,7 +1294,21 @@ sub output {
 	my ($self) = @_;
 	my $buf = $self->indent() . sprintf('%-' . $self->{max_key_len} . 's', $self->{key}->output()) . ' => ' . $self->{value}->output() . ',' . $self->nl();
 	return $buf;
-} 
+}
+
+package PuppetParser::ArgumentList;
+
+our @ISA = 'PuppetParser::Object';
+
+sub get_parser_data {
+	my ($self) = @_;
+	my $parser_data = [
+		{ type => 'token', token => 'LPAREN' },
+		{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RPAREN', 'COMMA'] }, optional => 1, many => 1, name => 'args' },
+		{ type => 'token', token => 'RPAREN' },
+	];
+	return $parser_data;
+}
 
 package PuppetParser::Class;
 
@@ -1149,7 +1321,7 @@ sub get_parser_data {
 	my $parser_data = [
 		{ type => 'token', token => 'CLASS' },
 		{ name => 'classname', type => 'token', token => 'NAME' },
-		{ name => 'args', type => 'class', class => 'ArgumentList', optional => 1 },
+		{ name => 'args', type => 'class', class => 'PuppetParser::ArgumentList', optional => 1 },
 		{ type => 'group', optional => 1, members => [
 			{ type => 'token', token => 'INHERITS' },
 			{ name => 'inherits', type => 'token', token => 'NAME' },
@@ -1162,92 +1334,6 @@ sub get_parser_data {
 sub apply_defaults {
 	my ($self) = @_;
 	$self->SUPER::apply_defaults({ inner_spacing => 1, outer_spacing => 1 });
-}
-
-sub parser_group {
-	my ($self, $parser, $node) = @_;
-	print "parser_group()\n";
-	my $ret = {};
-	for my $node (@{$node->{members}}) {
-		print "parser_group(): Looking at node\n";
-		my $foo = $self->check_parser_node($parser, $node);
-		if(!defined $foo) {
-			if(!defined $node->{optional} || $node->{optional} == 0) {
-				return undef;
-			}
-		}
-		for(keys %{$foo}) {
-			$ret->{$_} = $foo->{$_};
-		}
-	}
-	return $ret;
-}
-
-sub parser_class {
-	my ($self, $parser, $node) = @_;
-	my $ret = {};
-	my $foo = $node->{class}->new(parent => $self);
-	if(!defined $foo) {
-		return undef;
-	}
-	if(defined $node->{name}) {
-		$ret->{$node->{name}} = $foo;
-	}
-	return $ret;
-}
-
-sub parser_block {
-	my ($self, $parser, $node) = @_;
-	if(!$parser->scan_for_token(['LBRACE'], [])) {
-		return undef;
-	}
-	$parser->next_token();
-	my $ret = { contents => [] };
-	while(1) {
-		if($self->{parser}->scan_for_token(['RBRACE'], [])) {
-			$self->{parser}->next_token();
-			last;
-		}
-		if($self->{parser}->eof()) {
-			$self->{parser}->error("Unexpected end of file");
-		}
-		push @{$ret->{contents}}, $self->{parser}->scan_for_object($self);
-	}
-	return $ret;
-}
-
-sub parser_token {
-	my ($self, $parser, $node) = @_;
-	print "parser_token(): looking for token type " . $node->{token} . "\n";
-	print "parser_token(): cur_token is of type " . $parser->cur_token()->{type} . "\n";
-	if($parser->scan_for_token([$node->{token}])) {
-		my $ret = {};
-		my $child = PuppetParser::Simple->new(parent => $self);
-		if(defined $node->{name}) {
-			$ret->{$node->{name}} = $child;
-		}
-		return $ret;
-	}
-	return undef;
-}
-
-sub check_parser_node {
-	my ($self, $parser, $node) = @_;
-	print "check_parser_node()\n";
-	my $parser_func = 'parser_' . $node->{type};
-	my $orig_token = $parser->get_token_idx();
-	if($self->can($parser_func)) {
-		my $foo = $self->$parser_func($parser, $node);
-		if(!defined $foo) {
-			if(!defined $node->{optional} || $node->{optional} == 0) {
-				$parser->set_token_idx($orig_token);
-				return undef;
-			}
-		}
-		return $foo;
-	}
-	print STDERR "ERROR: Parsing function ${parser_func}() doesn't exist yet\n";
-	return undef;
 }
 
 sub parse {
@@ -1373,12 +1459,13 @@ sub output {
 package PuppetParser::FunctionCall;
 
 our @ISA = 'PuppetParser::Object';
-our @patterns = (
-	['NAME', 'LPAREN'],
-);
 
-sub patterns {
-	return \@patterns;
+sub get_parser_data {
+	my $parser_data = [
+		{ type => 'token', token => ['NAME'], name => 'funcname' },
+		{ type => 'class', class => 'PuppetParser::ArgumentList', name => 'args' },
+	];
+	return $parser_data;
 }
 
 sub valid {
@@ -1395,7 +1482,7 @@ sub valid {
 #	$self->SUPER::apply_defaults({ outer_spacing => 1 });
 #}
 
-sub parse {
+sub old_parse {
 	my ($self) = @_;
 	$self->{funcname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
 	if(!$self->{parser}->scan_for_token(['LPAREN'])) {
@@ -1453,11 +1540,20 @@ sub apply_defaults {
 	$self->SUPER::apply_defaults({ inner_spacing => 0, outer_spacing => 1 });
 }
 
+sub get_parser_data {
+	my $parser_data = [
+		{ type => 'token', token => ['IF', 'ELSE', 'ELSIF'], name => 'variant' },
+		{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['LBRACE'] }, name => 'condition' },
+		{ type => 'block', name => 'contents' },
+	];
+	return $parser_data;
+}
+
 sub patterns {
 	return \@patterns;
 }
 
-sub parse {
+sub old_parse {
 	my ($self) = @_;
 	$self->{variant} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
 	if($self->{parser}->scan_for_token(['RETURN'], [])) {
@@ -1481,16 +1577,16 @@ sub output {
 package PuppetParser::Include;
 
 our @ISA = 'PuppetParser::Object';
-our @patterns = (
-	['INCLUDE'],
-	['IMPORT'],
-);
 
-sub patterns {
-	return \@patterns;
+sub get_parser_data {
+	my $parser_data = [
+		{ type => 'token', token => ['INCLUDE', 'IMPORT'], name => 'funcname' },
+		{ type => 'token', token => ['NAME', 'SQUOTES', 'DQUOTES', 'DOLLAR_VAR'], name => 'arg' },
+	];
+	return $parser_data;
 }
 
-sub parse {
+sub old_parse {
 	my ($self) = @_;
 	$self->{funcname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
 	if(!$self->{parser}->scan_for_token(['NAME', 'DOLLAR_VAR', 'SQUOTES', 'DQUOTES'])) {
@@ -1508,15 +1604,17 @@ sub output {
 package PuppetParser::VarAssignment;
 
 our @ISA = 'PuppetParser::Object';
-our @patterns = (
-	['DOLLAR_VAR', 'EQUALS'],
-);
 
-sub patterns {
-	return \@patterns;
+sub get_parser_data {
+	my $parser_data = [
+		{ type => 'token', token => 'DOLLAR_VAR', name => 'varname' },
+		{ type => 'token', token => 'EQUALS' },
+		{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RETURN'] }, name => 'value' },
+	];
+	return $parser_data;
 }
 
-sub parse {
+sub old_parse {
 	my ($self) = @_;
 	$self->{varname} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
 	if(!$self->{parser}->scan_for_token(['EQUALS'])) {
@@ -1606,6 +1704,14 @@ sub apply_defaults {
 	$self->SUPER::apply_defaults({ inner_spacing => 1, outer_spacing => 1 });
 }
 
+sub get_parser_data {
+	my ($self) = @_;
+	my $parser_data = [
+		{ type => 'token', token => ['NAME', 'CLASSREF', '1CLASS'], name => 'restype' },
+	];
+	return $parser_data;
+}
+
 sub patterns {
 	return \@patterns;
 }
@@ -1638,7 +1744,7 @@ sub valid {
 	return $valid;
 }
 
-sub parse {
+sub old_parse {
 	my ($self) = @_;
 	if($self->{parser}->scan_for_token(['AT'], [])) {
 		$self->{special} = '@';
