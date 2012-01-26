@@ -778,6 +778,7 @@ sub get_parser_data {
 		{ type => 'token', token => 'DOLLAR_VAR', name => 'varname' },
 		{ type => 'token', token => 'LBRACK' },
 		{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RBRACK'] }, name => 'inner' },
+		{ type => 'token', token => 'RBRACK' },
 	];
 	return $parser_data;
 }
@@ -1258,8 +1259,11 @@ our @ISA = 'PuppetParser::Object';
 
 sub get_parser_data {
 	my $parser_data = [
-		{ type => 'token', token => ['INCLUDE', 'IMPORT'], name => 'funcname' },
-		{ type => 'token', token => ['NAME', 'SQUOTES', 'DQUOTES', 'DOLLAR_VAR'], name => 'arg' },
+		{ type => 'token', token => ['INCLUDE', 'IMPORT', 'NAME'], name => 'funcname' },
+		{ type => 'any', members => [
+			{ type => 'token', token => ['NAME', 'SQUOTES', 'DQUOTES', 'DOLLAR_VAR'], name => 'arg' },
+			{ type => 'class', class => 'PuppetParser::ResourceRef', name => 'arg' },
+		]},
 	];
 	return $parser_data;
 }
@@ -1342,9 +1346,9 @@ our @ISA = 'PuppetParser::Object';
 
 sub get_parser_data {
 	my $parser_data = [
-		{ type => 'any', name => 'restitle', members => [
+		{ type => 'any', members => [
+			{ type => 'class', class => ['PuppetParser::ResourceRef', 'PuppetParser::ArrayRef', 'PuppetParser::List'], name => 'restitle' },
 			{ type => 'token', token => ['NAME', 'SQUOTES', 'DQUOTES', 'DOLLAR_VAR'], name => 'restitle' },
-			{ type => 'class', class => ['PuppetParser::ResourceRef', 'PuppetParser::List'], name => 'restitle' },
 		]},
 		{ type => 'token', token => 'COLON' },
 	];
