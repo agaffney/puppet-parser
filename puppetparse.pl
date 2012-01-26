@@ -1324,7 +1324,10 @@ sub apply_defaults {
 sub get_parser_data {
 	my ($self) = @_;
 	my $parser_data = [
-		{ type => 'token', token => ['NAME', 'CLASSREF', 'CLASS'], name => 'restype' },
+		{ type => 'any', name => 'restype', members => [
+			{ type => 'class', class => 'PuppetParser::ResourceRef', name => 'restype' },
+			{ type => 'token', token => ['NAME', 'CLASSREF', 'CLASS'], name => 'restype' },
+		]},
 		{ type => 'group', optional => 1, members => [
 			{ type => 'token', token => 'LCOLLECT' },
 			{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RCOLLECT'] }, optional => 1, name => 'tags' },
