@@ -899,10 +899,11 @@ our @ISA = 'PuppetParser::Object';
 
 sub get_parser_data {
 	my $parser_data = [
-		{ type => 'token', token => 'DOLLAR_VAR' },
+		{ type => 'token', token => 'DOLLAR_VAR', name => 'varname' },
 		{ type => 'token', token => 'QMARK' },
 		{ type => 'token', token => 'LBRACE' },
 		{ type => 'class', class => ['PuppetParser::KeyValuePair', 'PuppetParser::Comment'], name => 'items', many => 1 },
+		{ type => 'token', token => 'RBRACE' },
 	];
 	return $parser_data;
 }
@@ -910,6 +911,9 @@ sub get_parser_data {
 sub output {
 	my ($self) = @_;
 	my $max_key_len = 0;
+	if(ref $self->{items} ne 'ARRAY') {
+		$self->{items} = [ $self->{items} ];
+	}
 	for(@{$self->{items}}) {
 		if($_->can('key_len')) {
 			my $key_len = $_->key_len();
