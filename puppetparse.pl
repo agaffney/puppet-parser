@@ -1378,9 +1378,9 @@ sub get_parser_data {
 			{ type => 'token', token => ['NAME', 'CLASSREF', 'CLASS'], name => 'restype' },
 		]},
 		{ type => 'group', optional => 1, members => [
-			{ type => 'token', token => 'LCOLLECT' },
-			{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RCOLLECT'] }, optional => 1, name => 'tags' },
-			{ type => 'token', token => 'RCOLLECT' },
+			{ type => 'token', token => ['LCOLLECT', 'LLCOLLECT'], name => 'lcollect' },
+			{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RCOLLECT', 'RRCOLLECT'] }, optional => 1, name => 'tags' },
+			{ type => 'token', token => ['RCOLLECT', 'RRCOLLECT'], name => 'rcollect' },
 		]},
 		{ type => 'token', token => 'LBRACE' },
 		{ type => 'class', class => ['PuppetParser::KeyValuePair', 'PuppetParser::ResourceTitle', 'PuppetParser::Comment'], name => 'items', many => 1 },
@@ -1415,9 +1415,9 @@ sub output {
 	push @resources, $res;
 	my $buf = '';
 	for my $resource (@resources) {
-		$buf .= $self->indent() . (defined $self->{special} ? $self->{special} : '') . (defined $self->{virtual} ? $self->{virtual}->output() : '') . (defined $self->{exported} ? $self->{exported}->output() : '') . $self->{restype}->output();
-		if(defined $self->{collect}) {
-			$buf .= ' <<| ' . $self->{collect}->output() . ' |>>';
+		$buf .= $self->indent() . (defined $self->{virtual} ? $self->{virtual}->output() : '') . (defined $self->{exported} ? $self->{exported}->output() : '') . $self->{restype}->output();
+		if(defined $self->{lcollect}) {
+			$buf .= ' ' . $self->{lcollect}->output() . ' ' . $self->{tags}->output() . ' ' . $self->{rcollect}->output();
 		}
 		$buf .= ' { ';
 		if(defined $resource->{title}) {
