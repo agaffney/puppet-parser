@@ -1157,12 +1157,7 @@ sub output {
 	my ($self) = @_;
 	my $buf = $self->indent() . 'class ' . $self->{classname}->output();
 	if(defined $self->{args}) { #scalar(@{$self->{args}}) > 0) {
-		$buf .= ' (';
-		for(@{$self->{args}}) {
-			$buf .= $_->output() . ', ';
-		}
-		$buf =~ s/, $//;
-		$buf .= ')';
+		$buf .= $self->{args}->output();;
 	}
 	$buf .= ' {' . $self->nl();
 
