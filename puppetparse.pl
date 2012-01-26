@@ -1057,7 +1057,7 @@ our @ISA = 'PuppetParser::Object';
 
 sub get_parser_data {
 	my $parser_data = [
-		{ type => 'token', token => ['NAME', 'DEFAULT', 'REGEX', 'SQUOTES', 'DQUOTES'], name => 'key' },
+		{ type => 'token', token => ['NAME', 'DEFAULT', 'REGEX', 'SQUOTES', 'DQUOTES', 'NUMBER'], name => 'key' },
 		{ type => 'token', token => ['FARROW', 'PARROW'], name => 'arrow' },
 		{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['COMMA', 'SEMIC', 'RBRACE'] }, name => 'value' },
 		{ type => 'token', token => ['COMMA', 'SEMIC'], optional => 1 },
@@ -1277,7 +1277,7 @@ sub get_parser_data {
 	my $parser_data = [
 		{ type => 'token', token => 'DOLLAR_VAR', name => 'varname' },
 		{ type => 'token', token => 'EQUALS' },
-		{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RETURN'] }, name => 'value' },
+		{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RETURN', 'RBRACE'] }, name => 'value' },
 	];
 	return $parser_data;
 }
