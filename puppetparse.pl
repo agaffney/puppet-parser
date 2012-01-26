@@ -860,6 +860,9 @@ sub get_parser_data {
 sub output {
 	my ($self) = @_;
 	my $max_key_len = 0;
+	if(ref $self->{items} ne 'ARRAY') {
+		$self->{items} = [ $self->{items} ];
+	}
 	for(@{$self->{items}}) {
 		if($_->can('key_len')) {
 			my $key_len = $_->key_len();
@@ -878,7 +881,7 @@ sub output {
 		}
 		$buf .= $_->output();
 	}
-	$buf .= (scalar(@{$self->{items}}) > 0 ? $self->indent() : ' ') . '}' . $self->nl();
+	$buf .= (scalar(@{$self->{items}}) > 0 ? $self->indent() : ' ') . '}' . (!defined $self->{embed} || $self->{embed} == 0 ? $self->nl() : '');
 	return $buf;
 }
 
