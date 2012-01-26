@@ -100,7 +100,7 @@ my @object_classes = (
 	'PuppetParser::Node',
 	'PuppetParser::Define',
 	'PuppetParser::CaseStatement',
-	'PuppetParser::CaseCondition',
+#	'PuppetParser::CaseCondition',
 #	'PuppetParser::DependencyChain',
 	'PuppetParser::ResourceRef',
 );
@@ -413,39 +413,6 @@ sub scan_for_object {
 	}
 }
 
-sub scan_for_value {
-	my ($self, $parent, $term) = @_;
-	if(!defined $term) {
-		$term = ['RETURN', 'COMMENT'];
-	}
-	my $orig_token = $self->get_token_idx();
-	if(PuppetParser::Selector->valid($self, $parent)) {
-		return PuppetParser::Selector->new(parent => $parent, parser => $self, level => $parent->{level});
-	}
-	if(PuppetParser::ResourceRef->valid($self, $parent)) {
-		return PuppetParser::ResourceRef->new(parent => $parent, parser => $self);
-	}
-	if($self->scan_for_token(['SQUOTES', 'NAME', 'DQUOTES', 'DOLLAR_VAR', 'NOT', 'DEFAULT', 'REGEX', 'NUMBER', 'CLASSREF', 'LPAREN', 'REGEX', 'UNDEF'])) {
-		# This looks like a simple value
-		my $value = PuppetParser::Simple->new(parser => $self);
-		if(!$self->scan_for_token($term)) {
-			# This isn't a simple value after all
-			$self->set_token_idx($orig_token);
-			return PuppetParser::Expression->new(parent => $parent, parser => $self, term => $term);
-		}
-		return $value;
-	}
-	if($self->scan_for_token(['LBRACE'])) {
-		# This looks like a hash
-		return PuppetParser::Hash->new(parent => $parent, parser => $self, level => $parent->{level});
-	}
-	if($self->scan_for_token(['LBRACK'])) {
-		# This looks like a list
-		return PuppetParser::List->new(parent => $parent, parser => $self, level => $parent->{level});
-	}
-	$self->error("Unexpected token '" . $self->cur_token()->{text} . "'");
-}
-
 package PuppetParser::Object;
 
 use Data::Dumper;
@@ -630,6 +597,8 @@ sub check_parser_node {
 	if(!defined $parser->cur_token()) {
 		return undef;
 	}
+#	my $token = $parser->cur_token();
+#	print "${class}::check_parser_node(): cur_token - type=" . $token->{type} . ", text=" . $token->{text} . ", line=" . $token->{line} . "\n";
 	my $orig_token = $parser->get_token_idx();
 	if($self->can($parser_func)) {
 		my $ret = {};
@@ -892,6 +861,10 @@ sub parse {
 		if($self->{parser}->scan_for_token($self->{term})) {
 			last;
 		}
+		if($self->{parser}->scan_for_token(['RBRACE'])) {
+			# This is a total hack, but it works
+			return 0;
+		}
 		if($self->{parser}->scan_for_token(['RETURN'])) {
 			$self->{parser}->next_token();
 			next;
@@ -965,7 +938,9 @@ sub get_parser_data {
 	my $parser_data = [
 		{ type => 'token', token => 'CASE' },
 		{ type => 'token', token => 'DOLLAR_VAR', name => 'casevar' },
-		{ type => 'block' },
+		{ type => 'token', token => 'LBRACE' },
+		{ type => 'class', class => ['PuppetParser::CaseCondition', 'PuppetParser::Comment'], many => 1, name => 'conditions' },
+		{ type => 'token', token => 'RBRACE' },
 	];
 	return $parser_data;
 }
@@ -978,7 +953,12 @@ sub apply_defaults {
 sub output {
 	my ($self) = @_;
 	my $buf = $self->indent() . 'case ' . $self->{casevar}->output() . ' {' . $self->nl();
-	$buf .= $self->output_children();
+	if(ref $self->{conditions} ne 'ARRAY') {
+		$self->{conditions} = [ $self->{conditions} ];
+	}
+	for(@{$self->{conditions}}) {
+		$buf .= $_->output();
+	}
 	$buf .= $self->indent() . '}' . $self->nl();
 	return $buf;
 }
@@ -990,12 +970,13 @@ our @ISA = 'PuppetParser::Object';
 sub get_parser_data {
 	my $parser_data = [
 		{ type => 'token', token => 'NODE' },
-		{ type => 'token', token => ['NAME', 'DEFAULT', 'REGEX', 'SQUOTES', 'DQUOTES'], name => 'nodename' },
+#		{ type => 'token', token => ['NAME', 'DEFAULT', 'REGEX', 'SQUOTES', 'DQUOTES'], name => 'nodename' },
+		{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['LBRACE'] }, name => 'nodename' },
 		{ type => 'group', optional => 1, members => [
 			{ type => 'token', token => 'INHERITS' },
 			{ type => 'token', token => ['NAME', 'DEFAULT', 'REGEX', 'SQUOTES', 'DQUOTES'], name => 'inherits' },
 		]},
-		{ type => 'block' },
+		{ type => 'block', name => 'contents' },
 	];
 	return $parser_data;
 }
@@ -1028,7 +1009,7 @@ sub get_parser_data {
 
 sub output {
 	my ($self) = @_;
-	my $buf = $self->indent() . $self->{condition}->output() . ': {' . $self->nl();
+	my $buf = $self->indent() . $self->{casecondition}->output() . ': {' . $self->nl();
 	$buf .= $self->output_children();
 	$buf .= $self->indent() . '}' . $self->nl();
 	return $buf;
