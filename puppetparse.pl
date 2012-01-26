@@ -167,7 +167,8 @@ sub parse {
 	# Start the process
 	$self->{tree} = PuppetParser::Object->new(type => 'ROOT', level => -1, parser => $self);
 	while($self->cur_token()) {
-		$self->{tree}->add_child($self->scan_for_object($self->{tree}));
+		my $foo = $self->scan_for_object($self->{tree});
+		push @{$self->{tree}->{contents}}, $foo;
 	}
 }
 
@@ -825,15 +826,15 @@ sub output {
 package PuppetParser::Comment;
 
 our @ISA = 'PuppetParser::Object';
-our @patterns = (
-	['COMMENT'],
-);
 
-sub patterns {
-	return \@patterns;
+sub get_parser_data {
+	my $parser_data = [
+		{ type => 'token', token => 'COMMENT', name => 'comment' },
+	];
+	return $parser_data;
 }
 
-sub parse {
+sub old_parse {
 	my ($self) = @_;
 	my $token = $self->{parser}->cur_token();
 	$self->{comment} = $token->{text};
@@ -849,15 +850,15 @@ sub output {
 package PuppetParser::MultilineComment;
 
 our @ISA = 'PuppetParser::Object';
-our @patterns = (
-	['MLCOMMENT'],
-);
 
-sub patterns {
-	return \@patterns;
+sub get_parser_data {
+	my $parser_data = [
+		{ type => 'token', token => 'MLCOMMENT', name => 'comment' },
+	];
+	return $parser_data;
 }
 
-sub parse {
+sub old_parse {
 	my ($self) = @_;
 	my $token = $self->{parser}->cur_token();
 	$self->{comment} = $token->{text};
@@ -872,13 +873,15 @@ sub output {
 package PuppetParser::ResourceRef;
 
 our @ISA = 'PuppetParser::Object';
-our @patterns = (
-	['CLASSREF'],
-	['DOLLAR_VAR', 'LBRACK'],
-);
 
-sub patterns {
-	return \@patterns;
+sub get_parser_data {
+	my $parser_data = [
+		{ type => 'token', token => ['CLASSREF', 'DOLLAR_VAR'], name => 'restype' },
+		{ type => 'token', token => ['LBRACK'] },
+		{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RBRACK'] }, name => 'inner' },
+		{ type => 'token', token => ['RBRACK'] },
+	];
+	return $parser_data;
 }
 
 sub valid {
@@ -898,7 +901,7 @@ sub valid {
 	return 0;
 }
 
-sub parse {
+sub old_parse {
 	my ($self) = @_;
 	$self->{restype} = PuppetParser::Simple->new(parent => $self, parser => $self->{parser});
 	$self->{parser}->next_token();
@@ -921,7 +924,20 @@ sub apply_defaults {
 	$self->SUPER::apply_defaults({ start => 'LBRACK', end => 'RBRACK' });
 }
 
-sub parse {
+sub get_parser_data {
+	my $parser_data = [
+		{ type => 'token', token => 'LBRACK' },
+#		{ type => 'group', name => 'items', many => 1, optional => 1, members => [
+#			{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['COMMA', 'RBRACK'] } },
+#			{ type => 'token', token => 'COMMA', optional => 1 },
+#		]},
+		{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RBRACK'] }, name => 'values' },
+		{ type => 'token', token => ['RBRACK'] },
+	];
+	return $parser_data;
+}
+
+sub old_parse {
 	my ($self) = @_;
 	$self->{items} = [];
 	if(!$self->{parser}->scan_for_token([$self->{start}], [])) {
@@ -1020,8 +1036,9 @@ our @ISA = 'PuppetParser::Object';
 
 sub parse {
 	my ($self) = @_;
+	my $packages = ['PuppetParser::FunctionCall', 'PuppetParser::List']; #, 'PuppetParser::Hash'];
 	$self->{parts} = [];
-	while(1) {
+	TOKEN: while(1) {
 		if($self->{parser}->scan_for_token($self->{term}, [])) {
 			last;
 		}
@@ -1029,10 +1046,12 @@ sub parse {
 			$self->{parser}->next_token();
 			next;
 		}
-		my $foo = PuppetParser::FunctionCall->new(parent => $self);
-		if(defined $foo) {
-			push @{$self->{parts}}, $foo;
-			next;
+		for my $package (@{$packages}) {
+			my $foo = $package->new(parent => $self);
+			if(defined $foo) {
+				push @{$self->{parts}}, $foo;
+				next TOKEN;
+			}
 		}
 		push @{$self->{parts}}, PuppetParser::Simple->new(parent => $self);
 	}
