@@ -1328,6 +1328,8 @@ sub apply_defaults {
 sub get_parser_data {
 	my ($self) = @_;
 	my $parser_data = [
+		{ type => 'token', token => 'AT', optional => 1, name => 'virtual' },
+		{ type => 'token', token => 'AT', optional => 1, name => 'exported' },
 		{ type => 'any', name => 'restype', members => [
 			{ type => 'class', class => 'PuppetParser::ResourceRef', name => 'restype' },
 			{ type => 'token', token => ['NAME', 'CLASSREF', 'CLASS'], name => 'restype' },
@@ -1370,7 +1372,7 @@ sub output {
 	push @resources, $res;
 	my $buf = '';
 	for my $resource (@resources) {
-		$buf .= $self->indent() . (defined $self->{special} ? $self->{special} : '') . $self->{restype}->output();
+		$buf .= $self->indent() . (defined $self->{special} ? $self->{special} : '') . (defined $self->{virtual} ? $self->{virtual}->output() : '') . (defined $self->{exported} ? $self->{exported}->output() : '') . $self->{restype}->output();
 		if(defined $self->{collect}) {
 			$buf .= ' <<| ' . $self->{collect}->output() . ' |>>';
 		}
