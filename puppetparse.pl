@@ -977,7 +977,7 @@ our @ISA = 'PuppetParser::Object';
 sub get_parser_data {
 	my $parser_data = [
 		{ type => 'token', token => 'CASE' },
-		{ type => 'token', token => 'DOLLAR_VAR', name => 'casevar' },
+		{ type => 'token', token => ['DOLLAR_VAR', 'SQUOTES', 'DQUOTES'], name => 'casevar' },
 		{ type => 'token', token => 'LBRACE' },
 		{ type => 'class', class => ['PuppetParser::CaseCondition', 'PuppetParser::Comment'], many => 1, name => 'conditions' },
 		{ type => 'token', token => 'RBRACE' },
