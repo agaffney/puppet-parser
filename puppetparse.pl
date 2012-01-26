@@ -1328,7 +1328,7 @@ sub get_parser_data {
 			{ type => 'token', token => 'RCOLLECT' },
 		]},
 		{ type => 'token', token => 'LBRACE' },
-		{ type => 'class', class => ['PuppetParser::ResourceTitle', 'PuppetParser::KeyValuePair', 'PuppetParser::Comment'], name => 'items', many => 1 },
+		{ type => 'class', class => ['PuppetParser::KeyValuePair', 'PuppetParser::ResourceTitle', 'PuppetParser::Comment'], name => 'items', many => 1 },
 		{ type => 'token', token => 'RBRACE' },
 	];
 	return $parser_data;
@@ -1346,6 +1346,7 @@ sub output {
 			if(defined $res->{title}) {
 				push @resources, $res;
 				$res = {};
+				$res->{title} = $_;
 				next;
 			}
 			$res->{title} = $_;
@@ -1359,7 +1360,7 @@ sub output {
 	push @resources, $res;
 	my $buf = '';
 	for my $resource (@resources) {
-		$buf = $self->indent() . (defined $self->{special} ? $self->{special} : '') . $self->{restype}->output();
+		$buf .= $self->indent() . (defined $self->{special} ? $self->{special} : '') . $self->{restype}->output();
 		if(defined $self->{collect}) {
 			$buf .= ' <<| ' . $self->{collect}->output() . ' |>>';
 		}
