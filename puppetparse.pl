@@ -1295,7 +1295,11 @@ our @ISA = 'PuppetParser::Object';
 
 sub get_parser_data {
 	my $parser_data = [
-		{ type => 'class', class => ['PuppetParser::ResourceRef'], name => 'ref' },
+		{ type => 'any', members => [
+			{ type => 'class', class => ['PuppetParser::ResourceRef'], name => 'ref' },
+			{ type => 'token', token => 'CLASSREF', name => 'ref' },
+		]},
+		{ type => 'class', class => 'PuppetParser::Collect', optional => 1, name => 'collect' },
 		{ type => 'token', token => ['IN_EDGE', 'OUT_EDGE'], name => 'arrow' },
 	];
 	return $parser_data;
@@ -1303,7 +1307,7 @@ sub get_parser_data {
 
 sub output {
 	my ($self) = @_;
-	my $buf = $self->{ref}->output() . ' ' . $self->{arrow}->output();
+	my $buf = $self->{ref}->output() . ' ' . (defined $self->{collect} ? $self->{collect}->output() . ' ' : '') . $self->{arrow}->output();
 	return $buf;
 }
 
@@ -1319,7 +1323,11 @@ sub apply_defaults {
 sub get_parser_data {
 	my $parser_data = [
 		{ type => 'class', class => 'PuppetParser::DependencyChainPiece', name => 'items' },
-		{ type => 'class', class => 'PuppetParser::ResourceRef', name => 'lastitem' },
+		{ type => 'any', members => [
+			{ type => 'class', class => 'PuppetParser::ResourceRef', name => 'lastitem' },
+			{ type => 'token', token => 'CLASSREF', name => 'lastitem' },
+		]},
+		{ type => 'class', class => 'PuppetParser::Collect', optional => 1, name => 'lastcollect' },
 	];
 	return $parser_data;
 }
@@ -1334,6 +1342,9 @@ sub output {
 		$buf .= $_->output() . ' ';
 	}
 	$buf .= $self->{lastitem}->output();
+	if(defined $self->{lastcollect}) {
+		$buf .= ' ' . $self->{lastcollect}->output();
+	}
 	$buf .= $self->nl();
 	return $buf;
 }
@@ -1359,6 +1370,25 @@ sub output {
 	return $buf;
 }
 
+package PuppetParser::Collect;
+
+our @ISA = 'PuppetParser::Object';
+
+sub get_parser_data {
+	my $parser_data = [
+		{ type => 'token', token => ['LCOLLECT', 'LLCOLLECT'], name => 'lcollect' },
+		{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RCOLLECT', 'RRCOLLECT'] }, optional => 1, name => 'tags' },
+		{ type => 'token', token => ['RCOLLECT', 'RRCOLLECT'], name => 'rcollect' },
+	];
+	return $parser_data;
+}
+
+sub output {
+	my ($self) = @_;
+	my $buf = $self->{lcollect}->output() . (defined $self->{tags} ? ' ' . $self->{tags}->output() . ' ' : '') . $self->{rcollect}->output();
+	return $buf;
+}
+
 package PuppetParser::Resource;
 
 our @ISA = 'PuppetParser::Object';
@@ -1377,11 +1407,7 @@ sub get_parser_data {
 			{ type => 'class', class => 'PuppetParser::ResourceRef', name => 'restype' },
 			{ type => 'token', token => ['NAME', 'CLASSREF', 'CLASS'], name => 'restype' },
 		]},
-		{ type => 'group', optional => 1, members => [
-			{ type => 'token', token => ['LCOLLECT', 'LLCOLLECT'], name => 'lcollect' },
-			{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RCOLLECT', 'RRCOLLECT'] }, optional => 1, name => 'tags' },
-			{ type => 'token', token => ['RCOLLECT', 'RRCOLLECT'], name => 'rcollect' },
-		]},
+		{ type => 'class', class => 'PuppetParser::Collect', optional => 1, name => 'collect' },
 		{ type => 'token', token => 'LBRACE' },
 		{ type => 'class', class => ['PuppetParser::KeyValuePair', 'PuppetParser::ResourceTitle', 'PuppetParser::Comment'], name => 'items', many => 1 },
 		{ type => 'token', token => 'RBRACE' },
@@ -1416,8 +1442,8 @@ sub output {
 	my $buf = '';
 	for my $resource (@resources) {
 		$buf .= $self->indent() . (defined $self->{virtual} ? $self->{virtual}->output() : '') . (defined $self->{exported} ? $self->{exported}->output() : '') . $self->{restype}->output();
-		if(defined $self->{lcollect}) {
-			$buf .= ' ' . $self->{lcollect}->output() . ' ' . $self->{tags}->output() . ' ' . $self->{rcollect}->output();
+		if(defined $self->{collect}) {
+			$buf .= ' ' . $self->{collect}->output();
 		}
 		$buf .= ' { ';
 		if(defined $resource->{title}) {
