@@ -766,7 +766,7 @@ sub get_parser_data {
 
 sub output {
 	my ($self) = @_;
-	return $self->indent() . $self->{comment} . $self->nl();
+	return $self->indent() . $self->{comment}->output() . $self->nl();
 }
 
 package PuppetParser::ArrayRef;
@@ -1058,7 +1058,7 @@ our @ISA = 'PuppetParser::Object';
 
 sub get_parser_data {
 	my $parser_data = [
-		{ type => 'token', token => ['NAME', 'DEFAULT', 'REGEX', 'SQUOTES', 'DQUOTES', 'NUMBER'], name => 'key' },
+		{ type => 'token', token => ['NAME', 'DEFAULT', 'REGEX', 'SQUOTES', 'DQUOTES', 'NUMBER', 'CLASSREF'], name => 'key' },
 		{ type => 'token', token => ['FARROW', 'PARROW'], name => 'arrow' },
 		{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['COMMA', 'SEMIC', 'RBRACE'] }, name => 'value' },
 		{ type => 'token', token => ['COMMA', 'SEMIC'], optional => 1 },
