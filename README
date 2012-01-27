@@ -1,5 +1,11 @@
-This is a script I wrote to help me clean up a lot of old puppet manifests that
-were written using a variety of styles by a variety of authors.
+This is a script I wrote to help me clean up a lot of old puppet manifests
+that were written using a variety of styles by a variety of authors.
 
-It is written in perl and only has a few dependencies. Currently, you'll need
-the Parse::Lex module.
+It is written in perl and has only one dependency, Parse::Lex. I have tested
+with version 2.15 of Parse::Lex, but it should work fine with any newer
+version.
+
+The parser is implemented using a combination of a tokenizer and a custom
+grammer-based (or close enough) parsing engine.
+
+Copyright (C) 2012  Andrew Gaffney <andrew@agaffney.org>
