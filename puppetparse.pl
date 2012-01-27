@@ -93,6 +93,7 @@ my @object_classes = (
 	'PuppetParser::MultilineComment',
 	'PuppetParser::Class',
 	'PuppetParser::FunctionCall',
+	'PuppetParser::DependencyChain',
 	'PuppetParser::Resource',
 	'PuppetParser::IfStatement',
 	'PuppetParser::Include',
@@ -101,7 +102,6 @@ my @object_classes = (
 	'PuppetParser::Define',
 	'PuppetParser::CaseStatement',
 #	'PuppetParser::CaseCondition',
-	'PuppetParser::DependencyChain',
 #	'PuppetParser::ResourceRef',
 );
 my $default_object_class = 'PuppetParser::Simple';
@@ -1305,7 +1305,7 @@ our @ISA = 'PuppetParser::Object';
 
 sub get_parser_data {
 	my $parser_data = [
-		{ type => 'class', class => ['PuppetParser::ResourceRef'], name => 'ref' },
+		{ type => 'class', class => ['PuppetParser::Resource', 'PuppetParser::ResourceRef'], name => 'ref' },
 		{ type => 'token', token => ['IN_EDGE', 'OUT_EDGE'], name => 'arrow' },
 	];
 	return $parser_data;
@@ -1329,7 +1329,7 @@ sub apply_defaults {
 sub get_parser_data {
 	my $parser_data = [
 		{ type => 'class', class => 'PuppetParser::DependencyChainPiece', name => 'items', many => 1 },
-		{ type => 'class', class => 'PuppetParser::ResourceRef', name => 'lastitem' },
+		{ type => 'class', class => ['PuppetParser::Resource', 'PuppetParser::ResourceRef'], name => 'lastitem' },
 	];
 	return $parser_data;
 }
