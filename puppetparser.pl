@@ -1362,6 +1362,14 @@ sub output {
 
 package main;
 
+sub usage {
+	print "Usage: " . $0 . " [-dh] [-o <output>] <input>\n\n";
+	print "Options:\n\n";
+	print "  -d              Enables some debug output\n";
+	print "  -o <output>     Specifies the file to output to (defaults to STDOUT)\n";
+	print "  -h              Displays this help\n";
+}
+
 $| = 1;
 
 use Getopt::Std;
@@ -1372,14 +1380,23 @@ my $output = '';
 my $debug = 0;
 
 # Parse options
-my $result = getopts('do:', \%options);
+my $result = getopts('dho:', \%options);
 if(defined $options{'o'}) {
 	$output = $options{'o'};
 }
 if(defined $options{'d'}) {
 	$debug = $options{'d'};
 }
+if(defined $options{'h'}) {
+	usage();
+	exit;
+}
 my $file = shift;
+if(!defined $file) {
+	print "No input file specified!\n\n";
+	usage();
+	exit 1;
+}
 
 print "Parsing $file\n";
 my $parser = PuppetParser->new(file => $file, debug => $debug);
