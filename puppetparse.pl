@@ -796,16 +796,26 @@ our @ISA = 'PuppetParser::Object';
 sub get_parser_data {
 	my $parser_data = [
 		{ type => 'token', token => ['CLASSREF'], name => 'restype' },
-		{ type => 'token', token => ['LBRACK'] },
-		{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RBRACK'] }, name => 'inner' },
-		{ type => 'token', token => ['RBRACK'] },
+		{ type => 'any', members => [
+			{ type => 'group', members => [
+				{ type => 'token', token => ['LBRACK'] },
+				{ type => 'class', class => 'PuppetParser::Expression', args => { term => ['RBRACK'] }, name => 'inner' },
+				{ type => 'token', token => ['RBRACK'] },
+			]},
+			{ type => 'class', class => 'PuppetParser::Collect', name => 'collect' },
+		]},
 	];
 	return $parser_data;
 }
 
 sub output {
 	my ($self) = @_;
-	my $buf = $self->{restype}->output() . '[' . $self->{inner}->output() . ']';
+	my $buf = $self->{restype}->output();
+	if(defined $self->{collect}) {
+		$buf .= ' ' . $self->{collect}->output();
+	} else {
+		$buf .= '[' . $self->{inner}->output() . ']';
+	}
 	return $buf;
 }
 
@@ -1295,11 +1305,7 @@ our @ISA = 'PuppetParser::Object';
 
 sub get_parser_data {
 	my $parser_data = [
-		{ type => 'any', members => [
-			{ type => 'class', class => ['PuppetParser::ResourceRef'], name => 'ref' },
-			{ type => 'token', token => 'CLASSREF', name => 'ref' },
-		]},
-		{ type => 'class', class => 'PuppetParser::Collect', optional => 1, name => 'collect' },
+		{ type => 'class', class => ['PuppetParser::ResourceRef'], name => 'ref' },
 		{ type => 'token', token => ['IN_EDGE', 'OUT_EDGE'], name => 'arrow' },
 	];
 	return $parser_data;
@@ -1307,7 +1313,7 @@ sub get_parser_data {
 
 sub output {
 	my ($self) = @_;
-	my $buf = $self->{ref}->output() . ' ' . (defined $self->{collect} ? $self->{collect}->output() . ' ' : '') . $self->{arrow}->output();
+	my $buf = $self->{ref}->output() . ' ' . $self->{arrow}->output();
 	return $buf;
 }
 
@@ -1322,12 +1328,8 @@ sub apply_defaults {
 
 sub get_parser_data {
 	my $parser_data = [
-		{ type => 'class', class => 'PuppetParser::DependencyChainPiece', name => 'items' },
-		{ type => 'any', members => [
-			{ type => 'class', class => 'PuppetParser::ResourceRef', name => 'lastitem' },
-			{ type => 'token', token => 'CLASSREF', name => 'lastitem' },
-		]},
-		{ type => 'class', class => 'PuppetParser::Collect', optional => 1, name => 'lastcollect' },
+		{ type => 'class', class => 'PuppetParser::DependencyChainPiece', name => 'items', many => 1 },
+		{ type => 'class', class => 'PuppetParser::ResourceRef', name => 'lastitem' },
 	];
 	return $parser_data;
 }
@@ -1407,7 +1409,6 @@ sub get_parser_data {
 			{ type => 'class', class => 'PuppetParser::ResourceRef', name => 'restype' },
 			{ type => 'token', token => ['NAME', 'CLASSREF', 'CLASS'], name => 'restype' },
 		]},
-		{ type => 'class', class => 'PuppetParser::Collect', optional => 1, name => 'collect' },
 		{ type => 'token', token => 'LBRACE' },
 		{ type => 'class', class => ['PuppetParser::KeyValuePair', 'PuppetParser::ResourceTitle', 'PuppetParser::Comment'], name => 'items', many => 1 },
 		{ type => 'token', token => 'RBRACE' },
