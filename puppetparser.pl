@@ -1054,7 +1054,10 @@ sub output {
 	my ($self) = @_;
 	my $buf = $self->indent() . 'class ' . $self->{classname}->output();
 	if(defined $self->{args}) { #scalar(@{$self->{args}}) > 0) {
-		$buf .= $self->{args}->output();;
+		$buf .= $self->{args}->output();
+	}
+	if(defined $self->{inherits}) {
+		$buf .= ' inherits ' . $self->{inherits}->output();
 	}
 	$buf .= ' {' . $self->nl();
 
