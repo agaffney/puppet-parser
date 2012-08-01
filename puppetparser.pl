@@ -1196,7 +1196,7 @@ our @ISA = 'PuppetParser::Object';
 sub get_parser_data {
 	my $parser_data = [
 		{ type => 'class', class => ['PuppetParser::Resource', 'PuppetParser::ResourceRef'], name => 'ref' },
-		{ type => 'token', token => ['IN_EDGE', 'OUT_EDGE'], name => 'arrow' },
+		{ type => 'token', token => ['IN_EDGE', 'OUT_EDGE', 'IN_EDGE_SUB', 'OUT_EDGE_SUB'], name => 'arrow' },
 	];
 	return $parser_data;
 }
