@@ -585,7 +585,7 @@ sub output_children {
 	}
 	# Formatting fixups
 	$buf =~ s/\n{3,}/\n\n/gs;
-	$buf =~ s/}\n\n\s*(else|elsif) /} else /gs;
+	$buf =~ s/}\n\n\s*(else|elsif) /} $1 /gs;
 	return $buf;
 }
 
